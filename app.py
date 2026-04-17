@@ -12,7 +12,7 @@ app = Flask(__name__)
 app.secret_key = 'stock_secret_key_2026' # เปลี่ยนเป็นรหัสลับของคุณ
 
 # ตั้งค่า Rate Limit ป้องกันบอทยิง OTP
-limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
+#limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
 
 # ตั้งค่า Database Path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
