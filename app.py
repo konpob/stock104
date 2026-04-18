@@ -5,14 +5,9 @@ import smtplib
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from flask import Flask, render_template, request, jsonify, session, redirect
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 app.secret_key = 'stock_secret_key_2026' # เปลี่ยนเป็นรหัสลับของคุณ
-
-# ตั้งค่า Rate Limit ป้องกันบอทยิง OTP
-#limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
 
 # ตั้งค่า Database Path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -66,10 +61,9 @@ def logout():
     session.clear()
     return redirect('/')
 
-# ================= 2. ระบบ API: OTP =================
+# ================= 2. ระบบ API: OTP (ส่งจริงผ่านอีเมล) =================
 
 @app.route('/api/request-otp', methods=['POST'])
-@limiter.limit("3 per 5 minute")
 def request_otp():
     email = request.json.get('email')
     if not email or not email.endswith('@gmail.com'):
@@ -84,6 +78,7 @@ def request_otp():
         conn.commit()
 
     try:
+        # โค้ดส่งอีเมลของจริง
         msg = MIMEText(f'รหัส OTP ของคุณคือ: {otp_code} (หมดอายุใน 2 นาที)')
         msg['Subject'] = 'รหัสเข้าใช้งานระบบสต็อกร้านค้า'
         msg['From'] = 'konpob777@gmail.com'
@@ -91,12 +86,15 @@ def request_otp():
         
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
-        server.login('konpob777@gmail.com', 'bsuabflgvlejlmpb') # App Password ของคุณ
+        # ใช้ App Password ของคุณเพื่อส่งอีเมล
+        server.login('konpob777@gmail.com', 'bsuabflgvlejlmpb') 
         server.send_message(msg)
         server.quit()
+        
         return jsonify({'message': 'ส่ง OTP ไปยังอีเมลแล้ว'})
     except Exception as e:
-        return jsonify({'error': 'ไม่สามารถส่งอีเมลได้'}), 500
+        print(f"Mail Error: {e}")
+        return jsonify({'error': 'ไม่สามารถส่งอีเมลได้ โปรดเช็คการเชื่อมต่อ'}), 500
 
 @app.route('/api/verify-otp', methods=['POST'])
 def verify_otp():
@@ -181,18 +179,15 @@ def get_summary():
     with get_db() as conn:
         res = conn.execute(query, (store_id,)).fetchall()
         return jsonify([dict(r) for r in res])
-    
-    
 
 @app.route('/api/sales-details', methods=['GET'])
 def get_sales_details():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     
-    date_label = request.args.get('date') # รับวันที่ เช่น '2026-04-16'
+    date_label = request.args.get('date')
     
     with get_db() as conn:
-        # ดึงรายการขายทั้งหมดของวันนั้น เรียงตามเวลาล่าสุด
         query = """
             SELECT transaction_id, barcode, product_name, quantity, 
                    price_per_unit, total_price, strftime('%H:%M:%S', sale_date) as time_label
@@ -202,7 +197,6 @@ def get_sales_details():
         """
         rows = conn.execute(query, (store_id, date_label)).fetchall()
         
-        # จัดกลุ่มข้อมูลตาม transaction_id เพื่อแยกเป็นใบเสร็จแต่ละใบ
         receipts = {}
         for r in rows:
             tid = r['transaction_id']
@@ -214,9 +208,6 @@ def get_sales_details():
             
         return jsonify(receipts)
 
-
-
-
-# สั่งรันแอป (ไว้ท้ายสุดที่เดียว)
+# สั่งรันแอป
 if __name__ == '__main__':
     app.run(debug=True)
