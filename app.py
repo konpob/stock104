@@ -9,7 +9,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect
 app = Flask(__name__)
 app.secret_key = 'stock_secret_key_2026' # เปลี่ยนเป็นรหัสลับของคุณ
 
-# ตั้งค่า Database Path
+# ตั้งค่า Database Path  sa;dpajdpwamd
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "inventory.db")
 
