@@ -1,4 +1,14 @@
-venv/
-__pycache__/
-*.db
+# ไฟล์ลับ — ห้าม upload ขึ้น Git เด็ดขาด
 .env
+ 
+# ฐานข้อมูล
+inventory.db
+ 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.vscode/
+ 
