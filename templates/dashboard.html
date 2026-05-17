@@ -155,20 +155,129 @@
 
 <!-- ===== PAGE 4: รายงาน ===== -->
 <div id="page-report" class="page bottom-safe p-4 space-y-4">
+
+    <!-- Tab bar -->
     <div class="flex bg-white rounded-2xl p-1 border border-gray-100 shadow-sm">
-        <button id="btn-daily" onclick="loadReport('daily')" class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white transition-all">รายวัน</button>
-        <button id="btn-monthly" onclick="loadReport('monthly')" class="flex-1 py-2.5 rounded-xl text-sm font-bold text-gray-400 transition-all">รายเดือน</button>
+        <button id="rtab-sales" onclick="switchReportTab('sales')" class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white transition-all">📋 ยอดขาย</button>
+        <button id="rtab-finance" onclick="switchReportTab('finance')" class="flex-1 py-2.5 rounded-xl text-sm font-bold text-gray-400 transition-all">💰 การเงิน</button>
+        <button id="rtab-pdf" onclick="switchReportTab('pdf')" class="flex-1 py-2.5 rounded-xl text-sm font-bold text-gray-400 transition-all">📄 PDF</button>
     </div>
 
-    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
-        <div class="flex items-center justify-between">
-            <h3 class="font-bold text-gray-700 text-sm">💰 สรุปการเงิน</h3>
-            <input type="month" id="fin-month" onchange="loadFinancial()" class="text-xs border border-gray-200 rounded-xl px-3 py-1.5 outline-none focus:border-violet-400">
+    <!-- ===== TAB: ยอดขาย ===== -->
+    <div id="rsec-sales" class="report-section space-y-3">
+        <!-- Filter bar -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 space-y-3">
+            <div class="flex gap-2">
+                <button onclick="setSalesMode('daily')" id="sbtn-daily" class="flex-1 py-2 rounded-xl text-xs font-bold bg-violet-600 text-white transition-all">รายวัน</button>
+                <button onclick="setSalesMode('monthly')" id="sbtn-monthly" class="flex-1 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-500 transition-all">รายเดือน</button>
+            </div>
+            <div class="grid grid-cols-2 gap-2" id="sales-date-filter">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-bold mb-1">จากวันที่</p>
+                    <input type="date" id="sales-from" class="w-full text-xs border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-violet-400">
+                </div>
+                <div>
+                    <p class="text-[10px] text-gray-400 font-bold mb-1">ถึงวันที่</p>
+                    <input type="date" id="sales-to" class="w-full text-xs border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-violet-400">
+                </div>
+            </div>
+            <div id="sales-month-filter" class="hidden">
+                <p class="text-[10px] text-gray-400 font-bold mb-1">เดือน</p>
+                <input type="month" id="sales-month" class="w-full text-xs border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-violet-400">
+            </div>
+            <button onclick="loadSalesReport()" class="w-full py-2.5 bg-violet-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">🔍 ค้นหา</button>
         </div>
-        <div id="fin-summary" class="space-y-2"></div>
+
+        <!-- Summary bar -->
+        <div id="sales-summary-bar" class="hidden grid grid-cols-3 gap-2">
+            <div class="bg-green-50 rounded-xl p-3 text-center">
+                <p class="text-[10px] text-gray-400">รายได้รวม</p>
+                <p id="ss-income" class="font-black text-green-600 text-sm">฿0</p>
+            </div>
+            <div class="bg-violet-50 rounded-xl p-3 text-center">
+                <p class="text-[10px] text-gray-400">ออร์เดอร์</p>
+                <p id="ss-txn" class="font-black text-violet-600 text-sm">0</p>
+            </div>
+            <div class="bg-blue-50 rounded-xl p-3 text-center">
+                <p class="text-[10px] text-gray-400">เฉลี่ย/บิล</p>
+                <p id="ss-avg" class="font-black text-blue-600 text-sm">฿0</p>
+            </div>
+        </div>
+
+        <!-- Results table -->
+        <div id="sales-table-wrap" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-violet-50 border-b border-violet-100">
+                        <th class="text-left px-4 py-2.5 text-xs font-bold text-violet-700">วันที่</th>
+                        <th class="text-center px-2 py-2.5 text-xs font-bold text-violet-700">บิล</th>
+                        <th class="text-right px-4 py-2.5 text-xs font-bold text-violet-700">ยอด</th>
+                        <th class="text-center px-2 py-2.5 text-xs font-bold text-violet-700">รายละเอียด</th>
+                    </tr>
+                </thead>
+                <tbody id="sales-table-body" class="divide-y divide-gray-50"></tbody>
+            </table>
+        </div>
+
+        <!-- Receipt detail drawer -->
+        <div id="receipt-drawer" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div class="flex justify-between items-center">
+                <p class="font-bold text-gray-700 text-sm" id="drawer-date-label">—</p>
+                <button onclick="closeDrawer()" class="text-gray-400 text-xs bg-gray-100 px-3 py-1 rounded-full">✕ ปิด</button>
+            </div>
+            <div id="drawer-content" class="space-y-2 max-h-72 overflow-y-auto"></div>
+        </div>
+
+        <div id="sales-empty" class="hidden text-center py-12 text-gray-300 text-sm">ไม่มีข้อมูลในช่วงที่เลือก</div>
     </div>
 
-    <div id="report-list" class="space-y-3"></div>
+    <!-- ===== TAB: การเงิน ===== -->
+    <div id="rsec-finance" class="report-section hidden space-y-3">
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <h3 class="font-bold text-gray-700 text-sm">💰 สรุปการเงิน</h3>
+                <input type="month" id="fin-month" onchange="loadFinancial()" class="text-xs border border-gray-200 rounded-xl px-3 py-1.5 outline-none focus:border-violet-400">
+            </div>
+            <div id="fin-summary" class="space-y-2"></div>
+        </div>
+    </div>
+
+    <!-- ===== TAB: PDF ===== -->
+    <div id="rsec-pdf" class="report-section hidden space-y-3">
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+            <div class="text-center space-y-1">
+                <p class="text-2xl">📄</p>
+                <p class="font-black text-gray-700">สร้างรายงาน PDF</p>
+                <p class="text-xs text-gray-400">หัวกระดาษแสดงชื่อร้านค้า รองรับ A4</p>
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <p class="text-xs text-gray-500 font-bold mb-1">📅 จากวันที่</p>
+                    <input type="date" id="pdf-from" class="w-full text-sm border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-violet-400">
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 font-bold mb-1">📅 ถึงวันที่</p>
+                    <input type="date" id="pdf-to" class="w-full text-sm border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-violet-400">
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 font-bold mb-1">📋 รูปแบบรายงาน</p>
+                    <select id="pdf-type" class="w-full text-sm border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-violet-400 bg-white">
+                        <option value="summary">สรุปยอดรายวัน</option>
+                        <option value="detail">รายละเอียดทุกบิล</option>
+                    </select>
+                </div>
+                <button onclick="openPDFReport()" class="w-full py-4 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-2xl font-black text-sm active:scale-95 transition-all shadow-lg shadow-violet-200">
+                    🖨️ สร้าง & พิมพ์ PDF
+                </button>
+            </div>
+            <div class="bg-blue-50 rounded-xl p-3 text-xs text-blue-600 space-y-1">
+                <p class="font-bold">💡 วิธีบันทึกเป็น PDF</p>
+                <p>1. กดปุ่มสร้างรายงาน</p>
+                <p>2. หน้าต่างพิมพ์จะเปิดขึ้น</p>
+                <p>3. เลือก "Save as PDF" หรือ "บันทึกเป็น PDF"</p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- ===== PAGE 5: จัดการ ===== -->
@@ -281,7 +390,7 @@ function switchPage(page) {
     if (page === 'home') loadHome();
     if (page === 'sell') initScanner(); else stopScanner();
     if (page === 'orders') loadOrders();
-    if (page === 'report') { setDefaultMonth(); loadReport('daily'); loadFinancial(); }
+    if (page === 'report') { setDefaultMonth(); }
     if (page === 'manage') { showManageTab('products'); }
     window.scrollTo(0, 0);
 }
@@ -588,58 +697,140 @@ async function cancelOrder(oid) {
 }
 
 // ===== REPORT =====
-async function loadReport(mode) {
-    ['daily','monthly'].forEach(m => {
-        document.getElementById(`btn-${m}`).className = m === mode
+let currentSalesMode = 'daily';
+
+function switchReportTab(tab) {
+    document.querySelectorAll('.report-section').forEach(s => s.classList.add('hidden'));
+    document.getElementById(`rsec-${tab}`).classList.remove('hidden');
+    ['sales','finance','pdf'].forEach(t => {
+        document.getElementById(`rtab-${t}`).className = t === tab
             ? 'flex-1 py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white transition-all'
             : 'flex-1 py-2.5 rounded-xl text-sm font-bold text-gray-400 transition-all';
     });
-    const data = await fetch(`/api/sales-summary?mode=${mode}`).then(r => r.json());
-    document.getElementById('report-list').innerHTML = data.length
-        ? data.map(r => `
-            <div class="space-y-2">
-                <div onclick="toggleReceipts('${r.label}')" class="bg-white rounded-2xl border border-gray-100 p-4 flex justify-between items-center active:bg-gray-50 cursor-pointer">
-                    <div>
-                        <p class="text-[10px] text-gray-400 font-bold">${mode==='daily'?'วันที่':'เดือน'}</p>
-                        <p class="font-bold text-gray-700 text-sm">${r.label}</p>
-                        <p class="text-[10px] text-gray-400">${r.txn_count} ออร์เดอร์</p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-lg font-black text-green-600">฿${r.total.toLocaleString()}</p>
-                        <p class="text-[10px] text-gray-400">▼ ดูบิล</p>
-                    </div>
-                </div>
-                <div id="rec-${r.label}" class="hidden pl-3 border-l-2 border-violet-200 space-y-2"></div>
-            </div>`).join('')
-        : '<div class="text-center py-12 text-gray-300">ยังไม่มีข้อมูลยอดขาย</div>';
+    if (tab === 'finance') loadFinancial();
 }
 
-async function toggleReceipts(date) {
-    const div = document.getElementById(`rec-${date}`);
-    if (!div.classList.contains('hidden')) { div.classList.add('hidden'); return; }
-    div.classList.remove('hidden');
-    div.innerHTML = '<p class="text-xs text-violet-400 py-2 animate-pulse">กำลังโหลด...</p>';
+function setSalesMode(mode) {
+    currentSalesMode = mode;
+    ['daily','monthly'].forEach(m => {
+        document.getElementById(`sbtn-${m}`).className = m === mode
+            ? 'flex-1 py-2 rounded-xl text-xs font-bold bg-violet-600 text-white transition-all'
+            : 'flex-1 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-500 transition-all';
+    });
+    document.getElementById('sales-date-filter').classList.toggle('hidden', mode === 'monthly');
+    document.getElementById('sales-month-filter').classList.toggle('hidden', mode === 'daily');
+    closeDrawer();
+}
+
+async function loadSalesReport() {
+    // ซ่อนทุกอย่างก่อน
+    ['sales-summary-bar','sales-table-wrap','sales-empty','receipt-drawer'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+    });
+
+    let url;
+    if (currentSalesMode === 'daily') {
+        const from = document.getElementById('sales-from').value;
+        const to   = document.getElementById('sales-to').value;
+        if (!from || !to) return alert('กรุณาเลือกวันเริ่มต้นและสิ้นสุด');
+        if (from > to) return alert('วันเริ่มต้นต้องน้อยกว่าวันสิ้นสุด');
+        url = `/api/sales-summary?mode=daily&from=${from}&to=${to}`;
+    } else {
+        const month = document.getElementById('sales-month').value;
+        if (!month) return alert('กรุณาเลือกเดือน');
+        url = `/api/sales-summary?mode=monthly&month=${month}`;
+    }
+
+    const data = await fetch(url).then(r => r.json());
+
+    if (!data.length) {
+        document.getElementById('sales-empty').classList.remove('hidden');
+        return;
+    }
+
+    // คำนวณ summary
+    const totalIncome = data.reduce((s, r) => s + r.total, 0);
+    const totalTxn    = data.reduce((s, r) => s + r.txn_count, 0);
+    const avg         = totalTxn > 0 ? totalIncome / totalTxn : 0;
+    document.getElementById('ss-income').textContent = '฿' + totalIncome.toLocaleString(undefined, {minimumFractionDigits:2});
+    document.getElementById('ss-txn').textContent    = totalTxn;
+    document.getElementById('ss-avg').textContent    = '฿' + avg.toLocaleString(undefined, {minimumFractionDigits:0});
+    document.getElementById('sales-summary-bar').classList.remove('hidden');
+
+    // render ตาราง
+    document.getElementById('sales-table-body').innerHTML = data.map(r => `
+        <tr class="hover:bg-violet-50 transition-colors cursor-pointer" onclick="openDrawer('${r.label}')">
+            <td class="px-4 py-3 font-bold text-gray-700 text-sm">${r.label}</td>
+            <td class="px-2 py-3 text-center">
+                <span class="bg-violet-100 text-violet-700 text-xs font-bold px-2 py-0.5 rounded-full">${r.txn_count}</span>
+            </td>
+            <td class="px-4 py-3 text-right font-black text-green-600">฿${r.total.toLocaleString()}</td>
+            <td class="px-2 py-3 text-center text-violet-400 text-xs">▼</td>
+        </tr>`).join('');
+    document.getElementById('sales-table-wrap').classList.remove('hidden');
+}
+
+async function openDrawer(date) {
+    document.getElementById('drawer-date-label').textContent = `📋 รายละเอียด: ${date}`;
+    document.getElementById('drawer-content').innerHTML = '<p class="text-xs text-violet-400 animate-pulse py-2">กำลังโหลด...</p>';
+    document.getElementById('receipt-drawer').classList.remove('hidden');
+    document.getElementById('receipt-drawer').scrollIntoView({behavior:'smooth', block:'nearest'});
+
     const receipts = await fetch(`/api/sales-details?date=${date}`).then(r => r.json());
-    div.innerHTML = Object.keys(receipts).length
-        ? Object.keys(receipts).map(key => {
+    const keys = Object.keys(receipts);
+    document.getElementById('drawer-content').innerHTML = keys.length
+        ? keys.map(key => {
             const r = receipts[key];
-            return `<div class="bg-white rounded-2xl border border-dashed border-gray-200 p-3 text-sm">
-                <div class="flex justify-between text-[10px] text-gray-400 pb-2 border-b border-gray-100 mb-2">
-                    <span>${key}</span>
-                    <span>${r.time} น. | 💳 ${r.payment_method}</span>
+            return `<div class="bg-gray-50 rounded-xl p-3 space-y-1.5">
+                <div class="flex justify-between items-center">
+                    <span class="text-[10px] font-black text-gray-500">${key}</span>
+                    <span class="text-[10px] text-gray-400">${r.time} น.</span>
                 </div>
-                ${r.items.map(i=>`<div class="flex justify-between text-xs py-0.5"><span class="text-gray-600">${i.product_name} ×${i.quantity}</span><span class="font-bold">฿${i.total_price.toLocaleString()}</span></div>`).join('')}
-                <div class="flex justify-between border-t border-gray-100 mt-2 pt-2 font-black text-violet-700 text-sm">
+                <div class="flex justify-between text-[10px] text-gray-400 pb-1 border-b border-gray-200">
+                    <span>💳 ${r.payment_method}</span>
+                </div>
+                ${r.items.map(i => `
+                <div class="flex justify-between text-xs">
+                    <span class="text-gray-600">${i.product_name} <span class="text-gray-400">×${i.quantity}</span></span>
+                    <span class="font-bold text-gray-700">฿${i.total_price.toLocaleString()}</span>
+                </div>`).join('')}
+                <div class="flex justify-between border-t border-gray-200 pt-1.5 font-black text-violet-700 text-sm">
                     <span>รวม</span><span>฿${r.grand_total.toLocaleString()}</span>
                 </div>
             </div>`;
         }).join('')
-        : '<p class="text-xs text-gray-400 py-2">ไม่มีข้อมูล</p>';
+        : '<p class="text-xs text-gray-400 py-2 text-center">ไม่มีข้อมูล</p>';
+}
+
+function closeDrawer() {
+    document.getElementById('receipt-drawer').classList.add('hidden');
 }
 
 function setDefaultMonth() {
     const now = new Date();
-    document.getElementById('fin-month').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const y = now.getFullYear();
+    const m = String(now.getMonth()+1).padStart(2,'0');
+    const d = String(now.getDate()).padStart(2,'0');
+    // sales date range: เดือนนี้
+    const firstDay = `${y}-${m}-01`;
+    const today    = `${y}-${m}-${d}`;
+    document.getElementById('sales-from').value = firstDay;
+    document.getElementById('sales-to').value   = today;
+    document.getElementById('sales-month').value = `${y}-${m}`;
+    // fin-month
+    document.getElementById('fin-month').value = `${y}-${m}`;
+    // pdf default
+    document.getElementById('pdf-from').value = firstDay;
+    document.getElementById('pdf-to').value   = today;
+}
+
+function openPDFReport() {
+    const from = document.getElementById('pdf-from').value;
+    const to   = document.getElementById('pdf-to').value;
+    const type = document.getElementById('pdf-type').value;
+    if (!from || !to) return alert('กรุณาเลือกวันเริ่มต้นและสิ้นสุด');
+    if (from > to) return alert('วันเริ่มต้นต้องน้อยกว่าวันสิ้นสุด');
+    window.open(`/report/pdf?from=${from}&to=${to}&type=${type}`, '_blank');
 }
 
 async function loadFinancial() {

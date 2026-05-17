@@ -373,14 +373,32 @@ def dashboard_summary():
 def get_summary():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
-    mode = request.args.get('mode', 'daily')
-    fmt = '%Y-%m-%d' if mode == 'daily' else ('%Y-%m' if mode == 'monthly' else '%Y')
+    mode  = request.args.get('mode', 'daily')
+    from_ = request.args.get('from', '')
+    to_   = request.args.get('to', '')
+    month = request.args.get('month', '')
+    fmt   = '%Y-%m-%d' if mode == 'daily' else '%Y-%m'
     with get_db() as conn:
-        res = conn.execute(
-            f"SELECT strftime('{fmt}',OrderTime) as label, SUM(TotalAmount) as total, COUNT(*) as txn_count "
-            f"FROM Orders WHERE StoreID=? AND OrderStatus='Paid' GROUP BY label ORDER BY label DESC",
-            (store_id,)
-        ).fetchall()
+        if mode == 'daily' and from_ and to_:
+            res = conn.execute(
+                f"SELECT strftime('{fmt}',OrderTime) as label, SUM(TotalAmount) as total, COUNT(*) as txn_count "
+                f"FROM Orders WHERE StoreID=? AND OrderStatus='Paid' "
+                f"AND date(OrderTime) BETWEEN ? AND ? GROUP BY label ORDER BY label ASC",
+                (store_id, from_, to_)
+            ).fetchall()
+        elif mode == 'monthly' and month:
+            res = conn.execute(
+                f"SELECT strftime('{fmt}',OrderTime) as label, SUM(TotalAmount) as total, COUNT(*) as txn_count "
+                f"FROM Orders WHERE StoreID=? AND OrderStatus='Paid' "
+                f"AND strftime('%Y-%m',OrderTime)=? GROUP BY label ORDER BY label ASC",
+                (store_id, month)
+            ).fetchall()
+        else:
+            res = conn.execute(
+                f"SELECT strftime('{fmt}',OrderTime) as label, SUM(TotalAmount) as total, COUNT(*) as txn_count "
+                f"FROM Orders WHERE StoreID=? AND OrderStatus='Paid' GROUP BY label ORDER BY label DESC LIMIT 30",
+                (store_id,)
+            ).fetchall()
         return jsonify([dict(r) for r in res])
 
 # ================= SALES DETAILS (บิลรายวัน) =================
@@ -652,6 +670,182 @@ def admin_tables():
     with get_db() as conn:
         tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
         return jsonify({t['name']: conn.execute(f"SELECT COUNT(*) as c FROM '{t['name']}'").fetchone()['c'] for t in tables})
+
+@app.route('/report/pdf')
+def report_pdf():
+    store_id = session.get('store_id')
+    if not store_id: return redirect('/')
+    from_ = request.args.get('from', '')
+    to_   = request.args.get('to', '')
+    rtype = request.args.get('type', 'summary')
+    if not from_ or not to_:
+        return 'กรุณาระบุวันที่', 400
+    with get_db() as conn:
+        store = conn.execute('SELECT * FROM Stores WHERE StoreID=?', (store_id,)).fetchone()
+        store_name = store['StoreName'] if store else 'ร้านค้า'
+        store_phone = store['Phone'] or ''
+        store_address = store['Address'] or ''
+
+        # ดึงยอดรายวัน
+        daily = conn.execute(
+            "SELECT strftime('%Y-%m-%d',OrderTime) as date, "
+            "COUNT(*) as txn_count, SUM(TotalAmount) as total "
+            "FROM Orders WHERE StoreID=? AND OrderStatus='Paid' "
+            "AND date(OrderTime) BETWEEN ? AND ? "
+            "GROUP BY date ORDER BY date ASC",
+            (store_id, from_, to_)
+        ).fetchall()
+
+        grand_total = sum(r['total'] for r in daily)
+        grand_txn   = sum(r['txn_count'] for r in daily)
+
+        # ถ้า detail ดึงบิลแต่ละใบด้วย
+        orders_detail = []
+        if rtype == 'detail':
+            orders = conn.execute(
+                "SELECT o.OrderID, o.OrderTime, o.TotalAmount, p.PaymentMethod "
+                "FROM Orders o LEFT JOIN Payments p ON o.OrderID=p.OrderID "
+                "WHERE o.StoreID=? AND o.OrderStatus='Paid' "
+                "AND date(o.OrderTime) BETWEEN ? AND ? "
+                "ORDER BY o.OrderTime ASC",
+                (store_id, from_, to_)
+            ).fetchall()
+            for o in orders:
+                items = conn.execute(
+                    "SELECT pr.ProductName, od.Quantity, od.SubTotal "
+                    "FROM Order_Details od JOIN Products pr ON od.ProductID=pr.ProductID "
+                    "WHERE od.OrderID=?", (o['OrderID'],)
+                ).fetchall()
+                orders_detail.append({'order': dict(o), 'items': [dict(i) for i in items]})
+
+    # สร้าง HTML
+    daily_rows = ''.join(f"""
+        <tr>
+            <td>{r['date']}</td>
+            <td class="center">{r['txn_count']}</td>
+            <td class="right">฿{r['total']:,.2f}</td>
+        </tr>""" for r in daily)
+
+    detail_html = ''
+    if rtype == 'detail' and orders_detail:
+        detail_html = '<div class="page-break"></div><h2>รายละเอียดทุกบิล</h2>'
+        for od in orders_detail:
+            o = od['order']
+            detail_html += f"""
+            <div class="receipt-block">
+                <div class="receipt-header">
+                    <span>บิล #{o['OrderID']} — {o['OrderTime'][:16]}</span>
+                    <span>💳 {o['PaymentMethod'] or '-'}</span>
+                </div>
+                <table class="inner-table">
+                    {''.join(f"<tr><td>{i['ProductName']}</td><td class='center'>×{i['Quantity']}</td><td class='right'>฿{i['SubTotal']:,.2f}</td></tr>" for i in od['items'])}
+                    <tr class='total-row'><td colspan='2'><b>รวม</b></td><td class='right'><b>฿{o['TotalAmount']:,.2f}</b></td></tr>
+                </table>
+            </div>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>รายงานยอดขาย — {store_name}</title>
+<style>
+    @page {{ size: A4; margin: 20mm 15mm; }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: 'Sarabun', 'Kanit', sans-serif; font-size: 13px; color: #1a1a2e; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+    .no-print {{ display: block; }}
+    @media print {{ .no-print {{ display: none !important; }} .page-break {{ page-break-before: always; }} }}
+    /* Print button */
+    .print-btn {{ position: fixed; bottom: 24px; right: 24px; background: #7c3aed; color: white; border: none; border-radius: 14px; padding: 14px 28px; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 24px rgba(124,92,252,.4); z-index: 999; }}
+    /* Header */
+    .doc-header {{ border-bottom: 3px solid #7c3aed; padding-bottom: 14px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; }}
+    .store-name {{ font-size: 22px; font-weight: 900; color: #7c3aed; }}
+    .store-sub {{ font-size: 11px; color: #6b7280; margin-top: 3px; }}
+    .report-title {{ text-align: right; }}
+    .report-title h1 {{ font-size: 16px; font-weight: 900; color: #1a1a2e; }}
+    .report-title p {{ font-size: 11px; color: #6b7280; margin-top: 2px; }}
+    /* Summary cards */
+    .summary-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }}
+    .summary-card {{ background: #f5f3ff; border-radius: 10px; padding: 12px 14px; text-align: center; border: 1px solid #e9e5ff; }}
+    .summary-card .label {{ font-size: 10px; color: #8b7cf8; font-weight: 700; text-transform: uppercase; }}
+    .summary-card .value {{ font-size: 18px; font-weight: 900; color: #7c3aed; margin-top: 4px; }}
+    /* Table */
+    h2 {{ font-size: 14px; font-weight: 900; color: #1a1a2e; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb; }}
+    table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+    thead tr {{ background: #7c3aed; color: white; }}
+    th {{ padding: 9px 12px; font-size: 11px; font-weight: 700; text-align: left; }}
+    td {{ padding: 8px 12px; font-size: 12px; border-bottom: 1px solid #f3f4f6; }}
+    tr:nth-child(even) td {{ background: #fafafa; }}
+    .center {{ text-align: center; }}
+    .right {{ text-align: right; }}
+    .total-row td {{ background: #f5f3ff !important; font-weight: 700; border-top: 2px solid #7c3aed; }}
+    /* Footer */
+    .doc-footer {{ margin-top: 20px; padding-top: 10px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; font-size: 10px; color: #9ca3af; }}
+    /* Detail */
+    .receipt-block {{ margin-bottom: 12px; break-inside: avoid; }}
+    .receipt-header {{ background: #f5f3ff; padding: 7px 12px; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: #7c3aed; }}
+    .inner-table {{ width: 100%; border-collapse: collapse; border: 1px solid #e9e5ff; border-top: none; border-radius: 0 0 8px 8px; overflow: hidden; }}
+    .inner-table td {{ padding: 6px 12px; font-size: 12px; border-bottom: 1px solid #f3f4f6; }}
+</style>
+</head>
+<body>
+<button class="print-btn no-print" onclick="window.print()">🖨️ พิมพ์ / บันทึก PDF</button>
+
+<div class="doc-header">
+    <div>
+        <div class="store-name">🏪 {store_name}</div>
+        <div class="store-sub">{store_phone}{(' | ' + store_address) if store_address else ''}</div>
+    </div>
+    <div class="report-title">
+        <h1>รายงานยอดขาย</h1>
+        <p>{'สรุปรายวัน' if rtype == 'summary' else 'รายละเอียดทุกบิล'}</p>
+        <p>ช่วง: {from_} ถึง {to_}</p>
+    </div>
+</div>
+
+<div class="summary-grid">
+    <div class="summary-card">
+        <div class="label">รายได้รวม</div>
+        <div class="value">฿{grand_total:,.0f}</div>
+    </div>
+    <div class="summary-card">
+        <div class="label">จำนวนออร์เดอร์</div>
+        <div class="value">{grand_txn}</div>
+    </div>
+    <div class="summary-card">
+        <div class="label">เฉลี่ย/บิล</div>
+        <div class="value">฿{(grand_total/grand_txn if grand_txn else 0):,.0f}</div>
+    </div>
+</div>
+
+<h2>สรุปยอดขายรายวัน</h2>
+<table>
+    <thead>
+        <tr><th>วันที่</th><th class="center">จำนวนออร์เดอร์</th><th class="right">ยอดขาย</th></tr>
+    </thead>
+    <tbody>
+        {daily_rows}
+        <tr class="total-row">
+            <td><b>รวมทั้งหมด</b></td>
+            <td class="center"><b>{grand_txn}</b></td>
+            <td class="right"><b>฿{grand_total:,.2f}</b></td>
+        </tr>
+    </tbody>
+</table>
+
+{detail_html}
+
+<div class="doc-footer">
+    <span>สร้างเมื่อ: {datetime.now().strftime('%d/%m/%Y %H:%M')}</span>
+    <span>Stock Manager — {store_name}</span>
+</div>
+
+<script>
+    // auto print เมื่อโหลดหน้า (optional ให้ user เลือกเอง)
+    // window.onload = () => setTimeout(() => window.print(), 500);
+</script>
+</body>
+</html>"""
+    return html
 
 if __name__ == '__main__':
     app.run(debug=True)
