@@ -149,6 +149,7 @@ def seed_mock_data(store_id):
             status = statuses[i]
 
             # สุ่มสินค้า 1-3 รายการต่อบิล
+            if not prod_rows: break
             chosen = random.sample(prod_rows, k=random.randint(1, min(3, len(prod_rows))))
             total_amount = sum(p['UnitPrice'] * random.randint(1, 4) for p in chosen)
 
