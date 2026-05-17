@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Stock Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         * { -webkit-tap-highlight-color: transparent; }
@@ -16,7 +16,19 @@
         .nav-btn.active span:first-child { transform: scale(1.2); }
         .nav-btn.active p { color: #7c3aed; font-weight: 700; }
         .nav-btn p { color: #9ca3af; font-size: 10px; font-weight: 600; }
-        #reader button { background-color:#7c3aed!important;color:white!important;border-radius:12px!important;padding:8px 16px!important;border:none!important;margin-top:8px!important; }
+        /* Scanner */
+        #scanner-video-wrap { position:relative; width:100%; background:#000; overflow:hidden; }
+        #reader { width:100%; height:100%; }
+        #reader video { width:100%!important; height:100%!important; object-fit:cover!important; }
+        #scan-frame { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+            width:65vw; max-width:260px; height:65vw; max-height:260px;
+            border:3px solid rgba(124,92,252,0.8); border-radius:16px; pointer-events:none; box-shadow:0 0 0 9999px rgba(0,0,0,0.45); }
+        #scan-frame::before,#scan-frame::after { content:''; position:absolute; width:24px; height:24px; border-color:#a78bfa; border-style:solid; }
+        #scan-frame::before { top:-3px; left:-3px; border-width:4px 0 0 4px; border-radius:6px 0 0 0; }
+        #scan-frame::after  { bottom:-3px; right:-3px; border-width:0 4px 4px 0; border-radius:0 0 6px 0; }
+        #scan-line { position:absolute; left:10%; width:80%; height:2px; background:linear-gradient(90deg,transparent,#a78bfa,transparent);
+            animation:scanLine 2s linear infinite; }
+        @keyframes scanLine { 0%{top:10%} 50%{top:88%} 100%{top:10%} }
         .slide-up { animation: slideUp 0.2s ease-out; }
         @keyframes slideUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
         .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200; }
@@ -89,15 +101,18 @@
 
 <!-- ===== PAGE 2: ขาย ===== -->
 <div id="page-sell" class="page bottom-safe">
-    <div class="bg-black aspect-[4/3] max-h-[45vh] relative overflow-hidden">
-        <div id="reader" class="w-full h-full"></div>
-        <div class="absolute inset-0 border-[3px] border-violet-400/50 m-12 rounded-2xl pointer-events-none"></div>
+    <div id="scanner-video-wrap" style="height:52vw;max-height:280px;">
+        <div id="reader" style="width:100%;height:100%;"></div>
+        <div id="scan-frame"><div id="scan-line"></div></div>
     </div>
 
-    <div class="p-3 flex gap-2 bg-white border-b border-gray-100">
-        <input id="manual-input" type="text" placeholder="พิมพ์บาร์โค้ดแทนแสกน..." inputmode="numeric"
-               class="flex-1 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none border border-gray-200 focus:border-violet-400">
-        <button onclick="manualAdd()" class="bg-violet-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm active:scale-95">เพิ่ม</button>
+    <div class="px-3 pt-2.5 pb-1 bg-white border-b border-gray-100 space-y-2">
+        <div class="flex gap-2">
+            <input id="manual-input" type="text" placeholder="พิมพ์บาร์โค้ดแทนแสกน..." inputmode="numeric"
+                   class="flex-1 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none border border-gray-200 focus:border-violet-400">
+            <button onclick="manualAdd()" class="bg-violet-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm active:scale-95">เพิ่ม</button>
+        </div>
+        <div id="scan-error" style="display:none" class="text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-xl text-center"></div>
     </div>
 
     <!-- Payment Method -->
@@ -325,21 +340,64 @@ function setPayMethod(method) {
 }
 
 // ===== SCANNER =====
-function initScanner() {
-    if (!html5Scanner) {
-        html5Scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 220 });
-        html5Scanner.render(async (barcode) => {
-            if (!scanAllowed) return;
-            scanAllowed = false;
-            if (!allProducts.length) allProducts = await fetch('/api/products').then(r => r.json());
-            // ใช้ QRCode แทน barcode
-            const p = allProducts.find(x => x.QRCode === barcode);
-            if (p) addToCart(p); else alert('ไม่พบสินค้า: ' + barcode);
-            setTimeout(() => { scanAllowed = true; }, 2500);
-        });
+async function initScanner() {
+    if (html5Scanner) return;
+    html5Scanner = new Html5Qrcode("reader");
+    try {
+        await html5Scanner.start(
+            { facingMode: { exact: 'environment' } },   // กล้องหลังเท่านั้น
+            { fps: 15, qrbox: { width: 240, height: 180 }, aspectRatio: 1.0,
+              disableFlip: false, videoConstraints: { facingMode: { exact: 'environment' } } },
+            async (barcode) => {
+                if (!scanAllowed) return;
+                scanAllowed = false;
+                if (!allProducts.length) allProducts = await fetch('/api/products').then(r => r.json());
+                const p = allProducts.find(x => x.QRCode === barcode);
+                if (p) { addToCart(p); vibrateShort(); }
+                else showScanError('ไม่พบสินค้า: ' + barcode);
+                setTimeout(() => { scanAllowed = true; }, 2000);
+            },
+            null // ไม่ต้องแสดง error แต่ละ frame
+        );
+    } catch (e) {
+        // ถ้าไม่มีกล้องหลัง fallback กล้องหน้า
+        try {
+            await html5Scanner.start(
+                { facingMode: 'user' },
+                { fps: 15, qrbox: { width: 240, height: 180 } },
+                async (barcode) => {
+                    if (!scanAllowed) return;
+                    scanAllowed = false;
+                    if (!allProducts.length) allProducts = await fetch('/api/products').then(r => r.json());
+                    const p = allProducts.find(x => x.QRCode === barcode);
+                    if (p) { addToCart(p); vibrateShort(); }
+                    else showScanError('ไม่พบสินค้า: ' + barcode);
+                    setTimeout(() => { scanAllowed = true; }, 2000);
+                },
+                null
+            );
+        } catch(e2) {
+            showScanError('ไม่สามารถเปิดกล้องได้');
+        }
     }
 }
-function stopScanner() { if (html5Scanner) { html5Scanner.clear(); html5Scanner = null; } }
+
+async function stopScanner() {
+    if (html5Scanner) {
+        try { await html5Scanner.stop(); } catch(e) {}
+        try { html5Scanner.clear(); } catch(e) {}
+        html5Scanner = null;
+    }
+}
+
+function vibrateShort() { if (navigator.vibrate) navigator.vibrate(60); }
+
+function showScanError(msg) {
+    const el = document.getElementById('scan-error');
+    if (!el) return;
+    el.textContent = msg; el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 2500);
+}
 
 async function manualAdd() {
     const code = document.getElementById('manual-input').value.trim();
