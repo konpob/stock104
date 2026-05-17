@@ -17,8 +17,8 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'fallback-secret')
 
 ADMIN_EMAIL          = os.getenv('ADMIN_EMAIL', '').lower().strip()
-SENDGRID_API_KEY     = os.getenv('SENDGRID_API_KEY', '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')
-MAIL_FROM            = os.getenv('MAIL_FROM', 'konpob777@gmail.com')
+SENDGRID_API_KEY     = os.getenv('SENDGRID_API_KEY', '')
+MAIL_FROM            = os.getenv('MAIL_FROM', '')
 GOOGLE_CLIENT_ID     = os.getenv('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
 
