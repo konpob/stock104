@@ -16,7 +16,7 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'fallback-secret')
 
-ADMIN_EMAIL          = os.getenv('ADMIN_EMAIL', '').lower().strip()
+ADMIN_EMAILS         = [e.strip().lower() for e in os.getenv('ADMIN_EMAIL', '').split(',') if e.strip()]
 SENDGRID_API_KEY     = os.getenv('SENDGRID_API_KEY', '')
 MAIL_FROM            = os.getenv('MAIL_FROM', '')
 GOOGLE_CLIENT_ID     = os.getenv('GOOGLE_CLIENT_ID')
@@ -538,7 +538,7 @@ def admin_callback():
             resp = google.get('https://openidconnect.googleapis.com/v1/userinfo')
             user_info = resp.json()
         email = user_info.get('email', '').lower().strip()
-        if email != ADMIN_EMAIL:
+        if email not in ADMIN_EMAILS:
             return render_template('admin_login.html',
                 error=f'อีเมล {email} ไม่มีสิทธิ์เข้าใช้งาน Admin Panel')
         session['is_admin']      = True
