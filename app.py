@@ -3,9 +3,8 @@ import sqlite3
 import random
 import hashlib
 import secrets
-import smtplib
+import requests
 from datetime import datetime, timedelta
-from email.mime.text import MIMEText
 from functools import wraps
 
 from dotenv import load_dotenv
@@ -18,8 +17,8 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'fallback-secret')
 
 ADMIN_EMAIL          = os.getenv('ADMIN_EMAIL', '').lower().strip()
-MAIL_FROM            = os.getenv('MAIL_FROM', 'konpob.krue@bumail.net')
-MAIL_PASSWORD        = os.getenv('MAIL_PASSWORD', 'jozg zydw ylkl ohtd')
+SENDGRID_API_KEY     = os.getenv('SENDGRID_API_KEY', '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')
+MAIL_FROM            = os.getenv('MAIL_FROM', 'konpob777@gmail.com')
 GOOGLE_CLIENT_ID     = os.getenv('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
 
@@ -255,25 +254,32 @@ def update_store_info():
 # ================= FORGOT / RESET PASSWORD =================
 def send_reset_email(to_email, reset_link):
     try:
-        body = f"""สวัสดี,
-
-คุณได้ขอรีเซ็ตรหัสผ่านสำหรับระบบจัดการร้านค้า
-
-กดลิงก์ด้านล่างเพื่อตั้งรหัสผ่านใหม่ (หมดอายุใน 30 นาที):
-{reset_link}
-
-หากคุณไม่ได้ขอรีเซ็ต กรุณาเพิกเฉยต่ออีเมลนี้
-
-— ระบบจัดการร้านค้า"""
-        msg = MIMEText(body, 'plain', 'utf-8')
-        msg['Subject'] = '🔑 รีเซ็ตรหัสผ่าน — Stock Manager'
-        msg['From']    = MAIL_FROM
-        msg['To']      = to_email
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(MAIL_FROM, MAIL_PASSWORD)
-        server.send_message(msg)
-        server.quit()
+        payload = {
+            'personalizations': [{'to': [{'email': to_email}]}],
+            'from': {'email': MAIL_FROM, 'name': 'Stock Manager'},
+            'subject': 'รีเซ็ตรหัสผ่าน — Stock Manager',
+            'content': [{
+                'type': 'text/html',
+                'value': f'''
+                <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f8f9fe;border-radius:16px">
+                    <h2 style="color:#7c5cfc;margin-bottom:8px">🔑 รีเซ็ตรหัสผ่าน</h2>
+                    <p style="color:#444;line-height:1.6">คุณได้ขอรีเซ็ตรหัสผ่านสำหรับระบบจัดการร้านค้า</p>
+                    <a href="{reset_link}" style="display:inline-block;margin:20px 0;padding:14px 28px;background:linear-gradient(135deg,#7c5cfc,#a78bfa);color:white;text-decoration:none;border-radius:12px;font-weight:bold">
+                        ตั้งรหัสผ่านใหม่
+                    </a>
+                    <p style="color:#888;font-size:13px">ลิงก์หมดอายุใน 30 นาที<br>หากคุณไม่ได้ขอรีเซ็ต กรุณาเพิกเฉยต่ออีเมลนี้</p>
+                </div>'''
+            }]
+        }
+        res = requests.post(
+            'https://api.sendgrid.com/v3/mail/send',
+            json=payload,
+            headers={'Authorization': f'Bearer {SENDGRID_API_KEY}', 'Content-Type': 'application/json'},
+            timeout=10
+        )
+        if res.status_code not in (200, 202):
+            print(f'SendGrid Error: {res.status_code} {res.text}')
+            return False
         return True
     except Exception as e:
         print(f'Mail Error: {e}')
