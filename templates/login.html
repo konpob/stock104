@@ -3,73 +3,337 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Stock Manager</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>เข้าสู่ระบบ — Stock Manager</title>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        :root{--bg:#f0f2f8;--surface:#ffffff;--border:#e2e5f0;--accent:#7c5cfc;--accent2:#a78bfa;--text:#1e1b3a;--muted:#8b8fa8;--danger:#ef4444;--success:#10b981}
+        body{font-family:'Kanit',sans-serif;background:var(--bg);min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px 16px;color:var(--text)}
+        body::before,body::after{content:'';position:fixed;border-radius:50%;filter:blur(100px);pointer-events:none;z-index:0}
+        body::before{width:500px;height:500px;background:radial-gradient(circle,rgba(124,92,252,.12) 0%,transparent 70%);top:-120px;left:-120px}
+        body::after{width:400px;height:400px;background:radial-gradient(circle,rgba(167,139,250,.1) 0%,transparent 70%);bottom:-80px;right:-80px}
+        .card{position:relative;z-index:1;width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);border-radius:28px;padding:36px 32px;box-shadow:0 8px 40px rgba(124,92,252,.1),0 1px 3px rgba(0,0,0,.06)}
+        .logo{width:64px;height:64px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 20px;box-shadow:0 8px 24px rgba(124,92,252,.35)}
+        .steps{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:28px}
+        .dot{width:8px;height:8px;border-radius:50%;background:#dde0f0;transition:all .3s}
+        .dot.active{background:var(--accent);width:24px;border-radius:4px}
+        .dot.done{background:var(--success)}
+        h1{font-size:22px;font-weight:900;text-align:center;letter-spacing:-.3px;margin-bottom:6px;color:var(--text)}
+        .subtitle{font-size:13px;color:var(--muted);text-align:center;margin-bottom:28px;line-height:1.6}
+        .panel{display:none}
+        .panel.active{display:block;animation:fadeUp .25s ease}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        .mode-tabs{display:flex;background:#f4f5fb;border:1px solid var(--border);border-radius:14px;padding:4px;margin-bottom:24px;gap:4px}
+        .mode-tab{flex:1;padding:10px;border:none;border-radius:11px;cursor:pointer;font-family:'Kanit',sans-serif;font-size:13px;font-weight:700;background:transparent;color:var(--muted);transition:all .2s}
+        .mode-tab.active{background:var(--accent);color:#fff;box-shadow:0 4px 12px rgba(124,92,252,.3)}
+        .field{margin-bottom:14px}
+        .field-label{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+        .input-wrap{position:relative}
+        .input-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:15px;pointer-events:none}
+        .eye-btn{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;color:var(--muted);padding:0;transition:color .2s}
+        .eye-btn:hover{color:var(--text)}
+        input{width:100%;background:#f8f9fe;border:1px solid var(--border);border-radius:14px;padding:13px 16px 13px 42px;font-family:'Kanit',sans-serif;font-size:14px;color:var(--text);outline:none;transition:border-color .2s,background .2s}
+        input.has-eye{padding-right:44px}
+        input:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px rgba(124,92,252,.1)}
+        input::placeholder{color:#b8bdd4}
+        .strength-bar{height:3px;border-radius:2px;margin-top:6px;overflow:hidden;background:#e8eaf5;display:none}
+        .strength-fill{height:100%;border-radius:2px;transition:width .3s,background .3s;width:0}
+        .strength-label{font-size:11px;margin-top:4px;display:none}
+        .match-hint{font-size:11px;margin-top:4px;min-height:16px}
+        textarea{width:100%;background:#f8f9fe;border:1px solid var(--border);border-radius:14px;padding:13px 16px;font-family:'Kanit',sans-serif;font-size:14px;color:var(--text);outline:none;resize:none;height:76px;transition:border-color .2s}
+        textarea:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px rgba(124,92,252,.1)}
+        textarea::placeholder{color:#b8bdd4}
+        .err{background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:12px 16px;font-size:13px;color:var(--danger);margin-bottom:14px;display:none}
+        .err.show{display:block}
+        .btn{width:100%;padding:15px;border:none;border-radius:14px;font-family:'Kanit',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px}
+        .btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 6px 20px rgba(124,92,252,.3)}
+        .btn-primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 10px 24px rgba(124,92,252,.4)}
+        .btn-primary:active:not(:disabled){transform:scale(.98)}
+        .btn-primary:disabled{opacity:.45;cursor:not-allowed}
+        .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);font-size:13px;padding:11px;margin-top:10px}
+        .btn-ghost:hover{color:var(--text);border-color:#c8cce0}
+        .success-icon{width:72px;height:72px;background:linear-gradient(135deg,#059669,#34d399);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;margin:0 auto 20px;box-shadow:0 8px 24px rgba(16,185,129,.3);animation:popIn .4s cubic-bezier(.34,1.56,.64,1)}
+        @keyframes popIn{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+        .skip-link{text-align:center;font-size:12px;color:var(--muted);margin-top:12px;cursor:pointer}
+        .skip-link:hover{color:var(--accent)}
+        @media(max-width:440px){.card{padding:28px 20px;border-radius:24px}}
+        .forgot-link{text-align:right;font-size:12px;color:var(--accent);cursor:pointer;margin-top:-8px;margin-bottom:14px;display:none}
+        .forgot-link:hover{text-decoration:underline}
+        .success-box{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px 16px;font-size:13px;color:#166534;margin-bottom:14px;display:none;text-align:center;line-height:1.6}
+        .success-box.show{display:block}
+    </style>
 </head>
-<body class="bg-gradient-to-br from-blue-50 via-white to-purple-50 min-h-screen flex items-center justify-center p-4 font-sans">
-    <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 border border-purple-100">
-        <div class="text-center mb-8">
-            <div class="inline-block p-4 bg-purple-100 rounded-full mb-4">📦</div>
-            <h1 class="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">ระบบจัดการสต็อก</h1>
-            <p class="text-gray-400 text-sm mt-1">กรุณาเข้าสู่ระบบเพื่อจัดการร้านค้า</p>
-        </div>
-        
-        <div id="email-form" class="space-y-4">
-            <input type="email" id="email" placeholder="example@gmail.com" class="w-full px-4 py-4 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-purple-400 outline-none transition-all">
-            <button onclick="requestOTP()" class="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-all">ขอรับรหัส OTP</button>
-        </div>
-
-        <div id="otp-form" class="hidden space-y-4">
-            <input type="text" id="otp-code" maxlength="6" placeholder="รหัส OTP 6 หลัก" class="w-full px-4 py-4 text-center text-3xl tracking-[1rem] font-bold rounded-2xl border border-gray-200 focus:ring-2 focus:ring-purple-400 outline-none">
-            <p class="text-center text-sm text-red-500 font-medium">หมดอายุใน: <span id="timer">02:00</span></p>
-            <button onclick="verifyOTP()" class="w-full bg-purple-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-all">ยืนยันเข้าสู่ระบบ</button>
-        </div>
+<body>
+<div class="card">
+    <div class="logo">&#127978;</div>
+    <div class="steps">
+        <div class="dot active" id="dot-0"></div>
+        <div class="dot" id="dot-1"></div>
     </div>
 
-    <script>
-        let userEmail = '';
-        async function requestOTP() {
-            const email = document.getElementById('email').value;
-            if (!email) return alert("กรุณากรอกอีเมล");
-            const res = await fetch('/api/request-otp', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({email})
-            });
-            if (res.ok) {
-                userEmail = email;
-                document.getElementById('email-form').classList.add('hidden');
-                document.getElementById('otp-form').classList.remove('hidden');
-                startTimer(120);
-            } else {
-                const data = await res.json();
-                alert(data.error);
-            }
-        }
+    <!-- PANEL 1: AUTH -->
+    <div class="panel active" id="panel-auth">
+        <h1>ยินดีต้อนรับ</h1>
+        <p class="subtitle">เข้าสู่ระบบหรือสมัครใหม่<br>เพื่อจัดการร้านค้าของคุณ</p>
+        <div class="mode-tabs">
+            <button class="mode-tab active" id="tab-login" onclick="setMode('login')">&#128273; เข้าสู่ระบบ</button>
+            <button class="mode-tab" id="tab-register" onclick="setMode('register')">&#10024; สมัครใหม่</button>
+        </div>
+        <div class="err" id="err-auth"></div>
+        <div class="field">
+            <div class="field-label">อีเมล</div>
+            <div class="input-wrap">
+                <span class="input-icon">&#9993;&#65039;</span>
+                <input type="email" id="auth-email" placeholder="example@gmail.com" autocomplete="email">
+            </div>
+        </div>
+        <div class="field">
+            <div class="field-label">รหัสผ่าน</div>
+            <div class="input-wrap">
+                <span class="input-icon">&#128274;</span>
+                <input type="password" id="auth-password" class="has-eye" placeholder="รหัสผ่านอย่างน้อย 6 ตัวอักษร" autocomplete="current-password" oninput="checkStrength()">
+                <button class="eye-btn" onclick="toggleEye('auth-password',this)" tabindex="-1">&#128065;&#65039;</button>
+            </div>
+            <div class="strength-bar" id="strength-bar"><div class="strength-fill" id="strength-fill"></div></div>
+            <div class="strength-label" id="strength-label"></div>
+        </div>
+        <div class="field" id="field-confirm" style="display:none">
+            <div class="field-label">ยืนยันรหัสผ่าน</div>
+            <div class="input-wrap">
+                <span class="input-icon">&#128271;</span>
+                <input type="password" id="auth-confirm" class="has-eye" placeholder="พิมพ์รหัสผ่านอีกครั้ง" autocomplete="new-password" oninput="checkMatch()">
+                <button class="eye-btn" onclick="toggleEye('auth-confirm',this)" tabindex="-1">&#128065;&#65039;</button>
+            </div>
+            <div class="match-hint" id="match-hint"></div>
+        </div>
+        <p class="forgot-link" id="forgot-link" onclick="goToPanel('forgot')">ลืมรหัสผ่าน?</p>
+        <button class="btn btn-primary" id="btn-auth" onclick="submitAuth()">
+            <span id="btn-label">เข้าสู่ระบบ</span><span>&#8594;</span>
+        </button>
+    </div>
 
-        async function verifyOTP() {
-            const code = document.getElementById('otp-code').value;
-            const res = await fetch('/api/verify-otp', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({email: userEmail, code})
-            });
-            if (res.ok) {
-                window.location.href = '/dashboard'; // ย้ายไปหน้าแดชบอร์ด
-            } else {
-                const data = await res.json();
-                alert(data.error);
-            }
-        }
+    <!-- PANEL 2: STORE INFO -->
+    <div class="panel" id="panel-store">
+        <div class="success-icon">&#10003;</div>
+        <h1>สมัครสำเร็จ! &#127881;</h1>
+        <p class="subtitle">กรอกข้อมูลร้านค้าเพื่อเริ่มต้น<br><span style="font-size:12px">สามารถแก้ไขได้ภายหลัง</span></p>
+        <div class="err" id="err-store"></div>
+        <div class="field">
+            <div class="field-label">ชื่อร้าน / สาขา *</div>
+            <div class="input-wrap">
+                <span class="input-icon">&#127978;</span>
+                <input type="text" id="store-name" placeholder="เช่น ร้านสะดวกซื้อสุขสวัสดิ์">
+            </div>
+        </div>
+        <div class="field">
+            <div class="field-label">เบอร์โทรติดต่อ</div>
+            <div class="input-wrap">
+                <span class="input-icon">&#128222;</span>
+                <input type="tel" id="store-phone" placeholder="0812345678">
+            </div>
+        </div>
+        <div class="field">
+            <div class="field-label">ที่อยู่ / ตำแหน่งร้าน</div>
+            <textarea id="store-address" placeholder="เช่น 123 ถ.สุขุมวิท แขวงคลองเตย กทม."></textarea>
+        </div>
+        <button class="btn btn-primary" id="btn-store" onclick="saveStoreInfo()" style="margin-top:8px">
+            <span>เริ่มใช้งานเลย</span><span>&#128640;</span>
+        </button>
+        <p class="skip-link" onclick="goToDashboard()">ข้ามไปก่อน กรอกทีหลัง &#8594;</p>
+    </div>
 
-        function startTimer(duration) {
-            let timer = duration, minutes, seconds;
-            const display = document.getElementById('timer');
-            const interval = setInterval(() => {
-                minutes = parseInt(timer / 60, 10);
-                seconds = parseInt(timer % 60, 10);
-                display.textContent = `${minutes < 10 ? "0" + minutes : minutes}:${seconds < 10 ? "0" + seconds : seconds}`;
-                if (--timer < 0) { clearInterval(interval); display.textContent = "หมดเวลา"; }
-            }, 1000);
+    <!-- PANEL 3: FORGOT PASSWORD -->
+    <div class="panel" id="panel-forgot">
+        <h1>&#128272; ลืมรหัสผ่าน</h1>
+        <p class="subtitle">กรอกอีเมลที่ใช้สมัคร<br>เราจะส่งลิงก์รีเซ็ตรหัสผ่านให้</p>
+        <div class="err" id="err-forgot"></div>
+        <div class="success-box" id="success-forgot"></div>
+        <div class="field" id="forgot-email-field">
+            <div class="field-label">อีเมล</div>
+            <div class="input-wrap">
+                <span class="input-icon">&#9993;&#65039;</span>
+                <input type="email" id="forgot-email" placeholder="example@gmail.com">
+            </div>
+        </div>
+        <button class="btn btn-primary" id="btn-forgot" onclick="submitForgot()">
+            <span id="btn-forgot-label">ส่งลิงก์รีเซ็ต</span><span>&#128140;</span>
+        </button>
+        <button class="btn btn-ghost" onclick="goToPanel('auth')">&#8592; กลับเข้าสู่ระบบ</button>
+    </div>
+</div>
+
+<script>
+let currentMode = 'login';
+
+function setMode(mode) {
+    currentMode = mode;
+    document.getElementById('tab-login').classList.toggle('active', mode === 'login');
+    document.getElementById('tab-register').classList.toggle('active', mode === 'register');
+    document.getElementById('field-confirm').style.display = mode === 'register' ? 'block' : 'none';
+    document.getElementById('btn-label').textContent = mode === 'login' ? 'เข้าสู่ระบบ' : 'สมัครใหม่';
+    const pw = document.getElementById('auth-password');
+    pw.placeholder = mode === 'register' ? 'ตั้งรหัสผ่านอย่างน้อย 6 ตัวอักษร' : 'รหัสผ่าน';
+    pw.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
+    document.getElementById('strength-bar').style.display = mode === 'register' ? 'block' : 'none';
+    document.getElementById('strength-label').style.display = mode === 'register' ? 'block' : 'none';
+    hideErr('err-auth');
+    document.getElementById('match-hint').textContent = '';
+    document.getElementById('forgot-link').style.display = mode === 'login' ? 'block' : 'none';
+}
+
+function goToPanel(panel) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + panel).classList.add('active');
+    const dotMap = { auth: 0, store: 1, forgot: -1 };
+    const idx = dotMap[panel] ?? 0;
+    document.querySelectorAll('.dot').forEach((d, i) => {
+        d.className = 'dot';
+        if (idx >= 0) {
+            if (i < idx) d.classList.add('done');
+            else if (i === idx) d.classList.add('active');
         }
-    </script>
+    });
+    // reset forgot form when leaving
+    if (panel !== 'forgot') {
+        document.getElementById('err-forgot').classList.remove('show');
+        document.getElementById('success-forgot').classList.remove('show');
+        document.getElementById('forgot-email').value = '';
+        document.getElementById('forgot-email-field').style.display = 'block';
+        document.getElementById('btn-forgot').style.display = 'flex';
+        document.getElementById('btn-forgot-label').textContent = 'ส่งลิงก์รีเซ็ต';
+        document.getElementById('btn-forgot').disabled = false;
+    }
+}
+
+function checkStrength() {
+    if (currentMode !== 'register') return;
+    const pw = document.getElementById('auth-password').value;
+    const fill = document.getElementById('strength-fill');
+    const label = document.getElementById('strength-label');
+    let score = 0;
+    if (pw.length >= 6) score++;
+    if (pw.length >= 10) score++;
+    if (/[A-Za-z]/.test(pw)) score++;
+    if (/[0-9]/.test(pw)) score++;
+    if (/[^A-Za-z0-9]/.test(pw)) score++;
+    const levels = [
+        {w:'20%',bg:'#f87171',t:'อ่อนมาก'},
+        {w:'40%',bg:'#fb923c',t:'อ่อน'},
+        {w:'60%',bg:'#facc15',t:'ปานกลาง'},
+        {w:'80%',bg:'#4ade80',t:'แข็งแรง'},
+        {w:'100%',bg:'#34d399',t:'แข็งแรงมาก'}
+    ];
+    const lv = levels[Math.min(score - 1, 4)] || levels[0];
+    if (pw.length > 0) {
+        fill.style.width = lv.w; fill.style.background = lv.bg;
+        label.textContent = 'ความแข็งแรง: ' + lv.t; label.style.color = lv.bg;
+    } else {
+        fill.style.width = '0'; label.textContent = '';
+    }
+}
+
+function checkMatch() {
+    const pw = document.getElementById('auth-password').value;
+    const cf = document.getElementById('auth-confirm').value;
+    const hint = document.getElementById('match-hint');
+    if (!cf) { hint.textContent = ''; return; }
+    if (pw === cf) { hint.textContent = '✓ รหัสผ่านตรงกัน'; hint.style.color = 'var(--success)'; }
+    else { hint.textContent = '✗ รหัสผ่านไม่ตรงกัน'; hint.style.color = 'var(--danger)'; }
+}
+
+function toggleEye(id, btn) {
+    const el = document.getElementById(id);
+    el.type = el.type === 'password' ? 'text' : 'password';
+    btn.textContent = el.type === 'password' ? '👁️' : '🙈';
+}
+
+function showErr(id, msg) { const e = document.getElementById(id); e.textContent = '⚠️ ' + msg; e.classList.add('show'); }
+function hideErr(id) { document.getElementById(id).classList.remove('show'); }
+
+async function submitAuth() {
+    const email = document.getElementById('auth-email').value.trim();
+    const password = document.getElementById('auth-password').value;
+    hideErr('err-auth');
+    if (!email) return showErr('err-auth', 'กรุณากรอกอีเมล');
+    if (!email.includes('@')) return showErr('err-auth', 'รูปแบบอีเมลไม่ถูกต้อง');
+    if (!password) return showErr('err-auth', 'กรุณากรอกรหัสผ่าน');
+    if (currentMode === 'register') {
+        if (password.length < 6) return showErr('err-auth', 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
+        if (password !== document.getElementById('auth-confirm').value) return showErr('err-auth', 'รหัสผ่านไม่ตรงกัน');
+    }
+    const btn = document.getElementById('btn-auth');
+    btn.disabled = true;
+    document.getElementById('btn-label').textContent = 'กำลังดำเนินการ...';
+    const endpoint = currentMode === 'login' ? '/api/login' : '/api/register';
+    const res = await fetch(endpoint, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({email, password})
+    });
+    btn.disabled = false;
+    document.getElementById('btn-label').textContent = currentMode === 'login' ? 'เข้าสู่ระบบ' : 'สมัครใหม่';
+    const data = await res.json();
+    if (!res.ok) return showErr('err-auth', data.error || 'เกิดข้อผิดพลาด');
+    if (data.is_new_store) {
+        goToPanel('store');
+        setTimeout(() => document.getElementById('store-name').focus(), 300);
+    } else {
+        goToDashboard();
+    }
+}
+
+async function saveStoreInfo() {
+    const name = document.getElementById('store-name').value.trim();
+    hideErr('err-store');
+    if (!name) return showErr('err-store', 'กรุณากรอกชื่อร้านค้า');
+    const btn = document.getElementById('btn-store'); btn.disabled = true;
+    const res = await fetch('/api/update-store-info', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({store_name: name, phone: document.getElementById('store-phone').value.trim(), address: document.getElementById('store-address').value.trim()})
+    });
+    btn.disabled = false;
+    if (res.ok) goToDashboard();
+    else { const d = await res.json(); showErr('err-store', d.error || 'บันทึกไม่สำเร็จ'); }
+}
+
+async function submitForgot() {
+    const email = document.getElementById('forgot-email').value.trim();
+    hideErr('err-forgot');
+    document.getElementById('success-forgot').classList.remove('show');
+    if (!email) return showErr('err-forgot', 'กรุณากรอกอีเมล');
+    if (!email.includes('@')) return showErr('err-forgot', 'รูปแบบอีเมลไม่ถูกต้อง');
+    const btn = document.getElementById('btn-forgot');
+    btn.disabled = true;
+    document.getElementById('btn-forgot-label').textContent = 'กำลังส่ง...';
+    const res = await fetch('/api/forgot-password', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({email})
+    });
+    btn.disabled = false;
+    document.getElementById('btn-forgot-label').textContent = 'ส่งลิงก์รีเซ็ต';
+    const data = await res.json();
+    if (!res.ok) return showErr('err-forgot', data.error || 'เกิดข้อผิดพลาด');
+    // ซ่อน form แสดง success
+    document.getElementById('forgot-email-field').style.display = 'none';
+    document.getElementById('btn-forgot').style.display = 'none';
+    const box = document.getElementById('success-forgot');
+    box.innerHTML = '&#9989; ส่งลิงก์รีเซ็ตไปที่<br><strong>' + email + '</strong><br><span style="font-size:12px;color:#166534">ลิงก์หมดอายุใน 30 นาที</span>';
+    box.classList.add('show');
+}
+
+function goToDashboard() { window.location.href = '/dashboard'; }
+
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const p = document.querySelector('.panel.active').id;
+    if (p === 'panel-auth') submitAuth();
+    else if (p === 'panel-store') saveStoreInfo();
+    else if (p === 'panel-forgot') submitForgot();
+});
+
+window.onload = () => {
+    document.getElementById('auth-email').focus();
+    document.getElementById('forgot-link').style.display = 'block';
+};
+</script>
 </body>
 </html>

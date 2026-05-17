@@ -1,6 +1,8 @@
 import os
 import sqlite3
 import random
+import hashlib
+import secrets
 import smtplib
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
@@ -10,14 +12,14 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from authlib.integrations.flask_client import OAuth
 
-# โหลด .env ก่อนทุกอย่าง
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'fallback-secret')
 
-# ================= CONFIG จาก .env =================
 ADMIN_EMAIL          = os.getenv('ADMIN_EMAIL', '').lower().strip()
+MAIL_FROM            = os.getenv('MAIL_FROM', 'konpob.krue@bumail.net')
+MAIL_PASSWORD        = os.getenv('MAIL_PASSWORD', 'jozg zydw ylkl ohtd')
 GOOGLE_CLIENT_ID     = os.getenv('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
 
@@ -38,112 +40,140 @@ DB_PATH  = os.path.join(BASE_DIR, 'inventory.db')
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA foreign_keys = ON')
     return conn
 
 def init_db():
     with get_db() as conn:
-        conn.execute('CREATE TABLE IF NOT EXISTS stores (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
-        conn.execute('CREATE TABLE IF NOT EXISTS otps (email TEXT PRIMARY KEY, code TEXT NOT NULL, expires_at DATETIME NOT NULL)')
-        conn.execute('''CREATE TABLE IF NOT EXISTS categories (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, store_id INTEGER NOT NULL,
-                        name TEXT NOT NULL, description TEXT,
-                        FOREIGN KEY(store_id) REFERENCES stores(id))''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS suppliers (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, store_id INTEGER NOT NULL,
-                        name TEXT NOT NULL, contact_phone TEXT, contact_email TEXT,
-                        FOREIGN KEY(store_id) REFERENCES stores(id))''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS products (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, store_id INTEGER NOT NULL,
-                        category_id INTEGER, supplier_id INTEGER,
-                        barcode TEXT, name TEXT NOT NULL,
-                        quantity INTEGER DEFAULT 0, price REAL DEFAULT 0,
-                        FOREIGN KEY(store_id) REFERENCES stores(id),
-                        FOREIGN KEY(category_id) REFERENCES categories(id),
-                        FOREIGN KEY(supplier_id) REFERENCES suppliers(id))''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS purchase_orders (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, store_id INTEGER NOT NULL,
-                        supplier_id INTEGER NOT NULL, order_date DATETIME NOT NULL,
-                        total_amount REAL DEFAULT 0, status TEXT DEFAULT 'pending',
-                        FOREIGN KEY(store_id) REFERENCES stores(id),
-                        FOREIGN KEY(supplier_id) REFERENCES suppliers(id))''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS purchase_order_items (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL,
-                        product_id INTEGER NOT NULL, quantity INTEGER NOT NULL, cost_price REAL NOT NULL,
-                        FOREIGN KEY(order_id) REFERENCES purchase_orders(id),
-                        FOREIGN KEY(product_id) REFERENCES products(id))''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS expenses (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, store_id INTEGER NOT NULL,
-                        amount REAL NOT NULL, description TEXT NOT NULL, expense_date DATETIME NOT NULL,
-                        FOREIGN KEY(store_id) REFERENCES stores(id))''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS sales (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, store_id INTEGER NOT NULL,
-                        transaction_id TEXT NOT NULL, barcode TEXT, product_name TEXT NOT NULL,
-                        quantity INTEGER NOT NULL, price_per_unit REAL NOT NULL,
-                        total_price REAL NOT NULL, sale_date DATETIME NOT NULL,
-                        FOREIGN KEY(store_id) REFERENCES stores(id))''')
+        # OTP table (auth helper — ไม่ใช่ตารางหลักของธุรกิจ)
+        conn.execute('''CREATE TABLE IF NOT EXISTS otps (
+            email TEXT PRIMARY KEY,
+            code TEXT NOT NULL,
+            expires_at DATETIME NOT NULL
+        )''')
+
+        # 1. Stores
+        conn.execute('''CREATE TABLE IF NOT EXISTS Stores (
+            StoreID       INTEGER PRIMARY KEY AUTOINCREMENT,
+            StoreName     VARCHAR NOT NULL,
+            Phone         VARCHAR,
+            Address       TEXT,
+            email         TEXT UNIQUE,
+            password_hash TEXT,
+            created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        # 2. Products
+        conn.execute('''CREATE TABLE IF NOT EXISTS Products (
+            ProductID   INTEGER PRIMARY KEY AUTOINCREMENT,
+            QRCode      VARCHAR UNIQUE,
+            ProductName VARCHAR NOT NULL,
+            StockQty    INTEGER DEFAULT 0,
+            UnitPrice   DECIMAL DEFAULT 0,
+            StoreID     INTEGER NOT NULL,
+            FOREIGN KEY(StoreID) REFERENCES Stores(StoreID)
+        )''')
+
+        # 3. Orders
+        conn.execute('''CREATE TABLE IF NOT EXISTS Orders (
+            OrderID     INTEGER PRIMARY KEY AUTOINCREMENT,
+            StoreID     INTEGER NOT NULL,
+            OrderTime   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            TotalAmount DECIMAL DEFAULT 0,
+            OrderStatus VARCHAR DEFAULT 'Pending',
+            FOREIGN KEY(StoreID) REFERENCES Stores(StoreID)
+        )''')
+
+        # 4. Order_Details
+        conn.execute('''CREATE TABLE IF NOT EXISTS Order_Details (
+            OrderDetailID INTEGER PRIMARY KEY AUTOINCREMENT,
+            OrderID       INTEGER NOT NULL,
+            ProductID     INTEGER NOT NULL,
+            Quantity      INTEGER NOT NULL,
+            SubTotal      DECIMAL NOT NULL,
+            FOREIGN KEY(OrderID)    REFERENCES Orders(OrderID),
+            FOREIGN KEY(ProductID)  REFERENCES Products(ProductID)
+        )''')
+
+        # 5. Payments
+        conn.execute('''CREATE TABLE IF NOT EXISTS Payments (
+            PaymentID     INTEGER PRIMARY KEY AUTOINCREMENT,
+            OrderID       INTEGER UNIQUE NOT NULL,
+            PaymentMethod VARCHAR NOT NULL,
+            AmountPaid    DECIMAL NOT NULL,
+            PaymentTime   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(OrderID) REFERENCES Orders(OrderID)
+        )''')
+
+        conn.execute('''CREATE TABLE IF NOT EXISTS reset_tokens (
+            token      TEXT PRIMARY KEY,
+            email      TEXT NOT NULL,
+            expires_at DATETIME NOT NULL
+        )''')
         conn.commit()
 
+# ---- Seed mock data (ตารางละ 10 records) ----
 def seed_mock_data(store_id):
     with get_db() as conn:
-        if conn.execute('SELECT COUNT(*) as c FROM categories WHERE store_id=?', (store_id,)).fetchone()['c'] > 0:
+        if conn.execute('SELECT COUNT(*) as c FROM Products WHERE StoreID=?', (store_id,)).fetchone()['c'] > 0:
             return
-        categories = [
-            (store_id,'เครื่องดื่ม','น้ำอัดลม น้ำผลไม้ ชา กาแฟ'),
-            (store_id,'ขนมขบเคี้ยว','มันฝรั่ง ป๊อปคอร์น บิสกิต'),
-            (store_id,'ของใช้ส่วนตัว','สบู่ แชมพู ยาสีฟัน'),
-            (store_id,'อาหารสำเร็จรูป','บะหมี่กึ่งสำเร็จรูป โจ๊กซอง'),
-            (store_id,'นม & ผลิตภัณฑ์นม','นมสด นมUHT โยเกิร์ต'),
-            (store_id,'เบเกอรี่','ขนมปัง เค้ก คุกกี้'),
-            (store_id,'ผลิตภัณฑ์ทำความสะอาด','น้ำยาล้างจาน ผงซักฟอก'),
-            (store_id,'ยาและวิตามิน','ยาสามัญประจำบ้าน วิตามินซี'),
-            (store_id,'เครื่องเขียน','ปากกา ดินสอ สมุด'),
-            (store_id,'อื่นๆ','สินค้าเบ็ดเตล็ดทั่วไป'),
+
+        # ---- Products (10 records) ----
+        products_data = [
+            ('8850006100084', 'โค้ก 325ml',        50,  20.0),
+            ('8850006100085', 'เป๊ปซี่ 325ml',      40,  20.0),
+            ('8850718111014', 'มันฝรั่ง Lays 44g',  60,  25.0),
+            ('8850111222333', 'สบู่ Safeguard 80g', 30,  35.0),
+            ('8850002111001', 'มาม่า รสหมู 55g',   100,   7.0),
+            ('8850006200001', 'นม Dutch Mill 200ml', 45,  15.0),
+            ('8850333444555', 'ขนมปังแซนวิช',        20,  30.0),
+            ('8850444555666', 'น้ำยาล้างจาน Sunlight 500ml', 25, 55.0),
+            ('8850555666777', 'วิตามินซี 1000mg',   15, 120.0),
+            ('8850666777888', 'ปากกา Pilot 0.5mm',  80,  15.0),
         ]
-        conn.executemany('INSERT INTO categories (store_id,name,description) VALUES (?,?,?)', categories)
-        suppliers = [
-            (store_id,'บริษัท ไทยเบฟเวอเรจ จำกัด','02-111-1111','thai_bev@supplier.com'),
-            (store_id,'บริษัท เนสท์เล่ (ไทย) จำกัด','02-222-2222','nestle@supplier.com'),
-            (store_id,'บริษัท พีแอนด์จี จำกัด','02-333-3333','pg@supplier.com'),
-            (store_id,'บริษัท มาม่า จำกัด','02-444-4444','mama@supplier.com'),
-            (store_id,'บริษัท ดัชมิลล์ จำกัด','02-555-5555','dutch@supplier.com'),
-            (store_id,'บริษัท เบทาโกร จำกัด','02-666-6666','betagro@supplier.com'),
-            (store_id,'บริษัท ไลอ้อน (ประเทศไทย) จำกัด','02-777-7777','lion@supplier.com'),
-            (store_id,'บริษัท ยูนิชาร์ม จำกัด','02-888-8888','unicharm@supplier.com'),
-            (store_id,'บริษัท ดอยคำ จำกัด','02-999-9999','doikham@supplier.com'),
-            (store_id,'บริษัท สยามแม็คโคร จำกัด','02-000-0000','makro@supplier.com'),
-        ]
-        conn.executemany('INSERT INTO suppliers (store_id,name,contact_phone,contact_email) VALUES (?,?,?,?)', suppliers)
-        cat_ids = [r['id'] for r in conn.execute('SELECT id FROM categories WHERE store_id=? ORDER BY id',(store_id,)).fetchall()]
-        sup_ids = [r['id'] for r in conn.execute('SELECT id FROM suppliers WHERE store_id=? ORDER BY id',(store_id,)).fetchall()]
-        products = [
-            (store_id,cat_ids[0],sup_ids[0],'8850006100084','โค้ก 325ml',50,20.0),
-            (store_id,cat_ids[0],sup_ids[0],'8850006100085','เป๊ปซี่ 325ml',40,20.0),
-            (store_id,cat_ids[1],sup_ids[1],'8850718111014','มันฝรั่ง Lays 44g',60,25.0),
-            (store_id,cat_ids[2],sup_ids[2],'8850111222333','สบู่ Safeguard 80g',30,35.0),
-            (store_id,cat_ids[3],sup_ids[3],'8850002111001','มาม่า รสหมู 55g',100,7.0),
-            (store_id,cat_ids[4],sup_ids[4],'8850006200001','นม Dutch Mill 200ml',45,15.0),
-            (store_id,cat_ids[5],sup_ids[5],'8850333444555','ขนมปังแซนวิช',20,30.0),
-            (store_id,cat_ids[6],sup_ids[6],'8850444555666','น้ำยาล้างจาน Sunlight 500ml',25,55.0),
-            (store_id,cat_ids[7],sup_ids[7],'8850555666777','วิตามินซี 1000mg',15,120.0),
-            (store_id,cat_ids[8],sup_ids[8],'8850666777888','ปากกา Pilot 0.5mm',80,15.0),
-        ]
-        conn.executemany('INSERT INTO products (store_id,category_id,supplier_id,barcode,name,quantity,price) VALUES (?,?,?,?,?,?,?)', products)
-        prod_ids = [r['id'] for r in conn.execute('SELECT id FROM products WHERE store_id=? ORDER BY id',(store_id,)).fetchall()]
-        po_data = [(store_id,sup_ids[i%len(sup_ids)],datetime.now()-timedelta(days=30-i*3),round(random.uniform(500,5000),2),'received' if i<7 else 'pending') for i in range(10)]
-        conn.executemany('INSERT INTO purchase_orders (store_id,supplier_id,order_date,total_amount,status) VALUES (?,?,?,?,?)', po_data)
-        po_ids = [r['id'] for r in conn.execute('SELECT id FROM purchase_orders WHERE store_id=? ORDER BY id',(store_id,)).fetchall()]
-        conn.executemany('INSERT INTO purchase_order_items (order_id,product_id,quantity,cost_price) VALUES (?,?,?,?)',
-                         [(po_ids[i],prod_ids[i%len(prod_ids)],random.randint(10,50),round(random.uniform(5,100),2)) for i in range(10)])
-        expense_data = [('ค่าเช่าพื้นที่',5000),('ค่าไฟฟ้า',1200),('ค่าน้ำประปา',300),('ค่าอินเทอร์เน็ต',599),
-                        ('ค่าแรงพนักงาน',9000),('ค่าบรรจุภัณฑ์ถุง',450),('ค่าซ่อมแอร์',1800),
-                        ('ค่าทำความสะอาด',500),('ค่าโฆษณา Facebook',300),('ค่าน้ำมันรถ',800)]
-        conn.executemany('INSERT INTO expenses (store_id,amount,description,expense_date) VALUES (?,?,?,?)',
-                         [(store_id,amt,desc,datetime.now()-timedelta(days=i*3)) for i,(desc,amt) in enumerate(expense_data)])
-        sales_data = [(store_id,f'TXN-SEED-{i+1:03d}',products[i%len(products)][3],products[i%len(products)][4],
-                       random.randint(1,5),products[i%len(products)][6],
-                       random.randint(1,5)*products[i%len(products)][6],
-                       datetime.now()-timedelta(days=i*2)) for i in range(10)]
-        conn.executemany('INSERT INTO sales (store_id,transaction_id,barcode,product_name,quantity,price_per_unit,total_price,sale_date) VALUES (?,?,?,?,?,?,?,?)', sales_data)
+        conn.executemany(
+            'INSERT OR IGNORE INTO Products (QRCode, ProductName, StockQty, UnitPrice, StoreID) VALUES (?,?,?,?,?)',
+            [(qr, name, qty, price, store_id) for qr, name, qty, price in products_data]
+        )
+
+        prod_rows = conn.execute(
+            'SELECT ProductID, QRCode, ProductName, UnitPrice FROM Products WHERE StoreID=? ORDER BY ProductID',
+            (store_id,)
+        ).fetchall()
+
+        # ---- Orders + Order_Details + Payments (10 records each) ----
+        methods = ['Cash', 'QR PromptPay']
+        statuses = ['Paid', 'Paid', 'Paid', 'Paid', 'Paid', 'Paid', 'Paid', 'Paid', 'Cancelled', 'Pending']
+
+        for i in range(10):
+            order_time = datetime.now() - timedelta(days=i * 2, hours=random.randint(0, 8))
+            status = statuses[i]
+
+            # สุ่มสินค้า 1-3 รายการต่อบิล
+            chosen = random.sample(prod_rows, k=random.randint(1, 3))
+            total_amount = sum(p['UnitPrice'] * random.randint(1, 4) for p in chosen)
+
+            order_id = conn.execute(
+                'INSERT INTO Orders (StoreID, OrderTime, TotalAmount, OrderStatus) VALUES (?,?,?,?)',
+                (store_id, order_time, round(total_amount, 2), status)
+            ).lastrowid
+
+            # Order_Details
+            for prod in chosen:
+                qty = random.randint(1, 4)
+                subtotal = round(prod['UnitPrice'] * qty, 2)
+                conn.execute(
+                    'INSERT INTO Order_Details (OrderID, ProductID, Quantity, SubTotal) VALUES (?,?,?,?)',
+                    (order_id, prod['ProductID'], qty, subtotal)
+                )
+
+            # Payments — เฉพาะบิลที่ Paid
+            if status == 'Paid':
+                conn.execute(
+                    'INSERT INTO Payments (OrderID, PaymentMethod, AmountPaid, PaymentTime) VALUES (?,?,?,?)',
+                    (order_id, random.choice(methods), round(total_amount, 2), order_time + timedelta(minutes=random.randint(1, 10)))
+                )
+
         conn.commit()
 
 init_db()
@@ -164,218 +194,376 @@ def logout():
     session.pop('store_id', None); session.pop('email', None)
     return redirect('/')
 
-# ================= OTP API =================
-@app.route('/api/request-otp', methods=['POST'])
-def request_otp():
-    email = request.json.get('email')
-    if not email or not email.endswith('@gmail.com'):
-        return jsonify({'error': 'กรุณาใช้บัญชี Google Email'}), 400
-    otp_code = str(random.randint(100000, 999999))
-    expires_at = datetime.now() + timedelta(minutes=2)
+# ================= AUTH API (Register / Login) =================
+def hash_password(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+@app.route('/api/register', methods=['POST'])
+def register():
+    d = request.json
+    email    = (d.get('email') or '').strip().lower()
+    password = (d.get('password') or '').strip()
+    if not email or not password:
+        return jsonify({'error': 'กรุณากรอกอีเมลและรหัสผ่าน'}), 400
+    if len(password) < 6:
+        return jsonify({'error': 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'}), 400
     with get_db() as conn:
-        conn.execute('INSERT OR REPLACE INTO otps (email,code,expires_at) VALUES (?,?,?)', (email,otp_code,expires_at))
+        if conn.execute('SELECT StoreID FROM Stores WHERE email=?', (email,)).fetchone():
+            return jsonify({'error': 'อีเมลนี้มีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบ'}), 400
+        store_id = conn.execute(
+            'INSERT INTO Stores (StoreName, Phone, Address, email, password_hash) VALUES (?,?,?,?,?)',
+            (email.split('@')[0], '', '', email, hash_password(password))
+        ).lastrowid
         conn.commit()
+    session['store_id'] = store_id; session['email'] = email
+    seed_mock_data(store_id)
+    return jsonify({'message': 'สมัครสำเร็จ', 'is_new_store': True})
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    d = request.json
+    email    = (d.get('email') or '').strip().lower()
+    password = (d.get('password') or '').strip()
+    if not email or not password:
+        return jsonify({'error': 'กรุณากรอกอีเมลและรหัสผ่าน'}), 400
+    with get_db() as conn:
+        store = conn.execute('SELECT * FROM Stores WHERE email=?', (email,)).fetchone()
+        if not store:
+            return jsonify({'error': 'ไม่พบบัญชีนี้ กรุณาสมัครใหม่'}), 400
+        if store['password_hash'] != hash_password(password):
+            return jsonify({'error': 'รหัสผ่านไม่ถูกต้อง'}), 400
+        session['store_id'] = store['StoreID']; session['email'] = email
+        # ถ้าชื่อร้านยังเป็น default (email prefix) = ยังไม่ได้กรอก
+        is_new = not store['StoreName'] or store['StoreName'] == email.split('@')[0]
+    return jsonify({'message': 'เข้าสู่ระบบสำเร็จ', 'is_new_store': is_new})
+
+@app.route('/api/update-store-info', methods=['POST'])
+def update_store_info():
+    store_id = session.get('store_id')
+    if not store_id: return jsonify({'error': 'Unauthorized'}), 401
+    d = request.json
+    name = (d.get('store_name') or '').strip()
+    if not name: return jsonify({'error': 'กรุณาระบุชื่อร้านค้า'}), 400
+    with get_db() as conn:
+        conn.execute(
+            'UPDATE Stores SET StoreName=?, Phone=?, Address=? WHERE StoreID=?',
+            (name, d.get('phone', ''), d.get('address', ''), store_id)
+        )
+        conn.commit()
+    return jsonify({'message': 'บันทึกข้อมูลร้านค้าสำเร็จ'})
+
+# ================= FORGOT / RESET PASSWORD =================
+def send_reset_email(to_email, reset_link):
     try:
-        msg = MIMEText(f'รหัส OTP ของคุณคือ: {otp_code} (หมดอายุใน 2 นาที)')
-        msg['Subject'] = 'รหัสเข้าใช้งานระบบสต็อกร้านค้า'
-        msg['From'] = 'konpob777@gmail.com'; msg['To'] = email
-        server = smtplib.SMTP('smtp.gmail.com', 587); server.starttls()
-        server.login('konpob777@gmail.com', 'bsuabflgvlejlmpb')
-        server.send_message(msg); server.quit()
-        return jsonify({'message': 'ส่ง OTP ไปยังอีเมลแล้ว'})
+        body = f"""สวัสดี,
+
+คุณได้ขอรีเซ็ตรหัสผ่านสำหรับระบบจัดการร้านค้า
+
+กดลิงก์ด้านล่างเพื่อตั้งรหัสผ่านใหม่ (หมดอายุใน 30 นาที):
+{reset_link}
+
+หากคุณไม่ได้ขอรีเซ็ต กรุณาเพิกเฉยต่ออีเมลนี้
+
+— ระบบจัดการร้านค้า"""
+        msg = MIMEText(body, 'plain', 'utf-8')
+        msg['Subject'] = '🔑 รีเซ็ตรหัสผ่าน — Stock Manager'
+        msg['From']    = MAIL_FROM
+        msg['To']      = to_email
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(MAIL_FROM, MAIL_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        return True
     except Exception as e:
         print(f'Mail Error: {e}')
-        return jsonify({'error': 'ไม่สามารถส่งอีเมลได้'}), 500
+        return False
 
-@app.route('/api/verify-otp', methods=['POST'])
-def verify_otp():
-    email = request.json.get('email'); code = request.json.get('code')
+@app.route('/api/forgot-password', methods=['POST'])
+def forgot_password():
+    email = (request.json.get('email') or '').strip().lower()
+    if not email: return jsonify({'error': 'กรุณากรอกอีเมล'}), 400
     with get_db() as conn:
-        rec = conn.execute('SELECT * FROM otps WHERE email=?', (email,)).fetchone()
-        if not rec or rec['code'] != code: return jsonify({'error': 'รหัส OTP ไม่ถูกต้อง'}), 400
+        store = conn.execute('SELECT StoreID FROM Stores WHERE email=?', (email,)).fetchone()
+        if not store:
+            # ไม่บอกว่าอีเมลไม่มีในระบบ (security)
+            return jsonify({'message': 'ส่งลิงก์รีเซ็ตแล้ว (ถ้าอีเมลนี้มีในระบบ)'}), 200
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now() + timedelta(minutes=30)
+        conn.execute('DELETE FROM reset_tokens WHERE email=?', (email,))
+        conn.execute('INSERT INTO reset_tokens (token, email, expires_at) VALUES (?,?,?)',
+                     (token, email, expires_at))
+        conn.commit()
+    reset_link = url_for('reset_password_page', token=token, _external=True)
+    ok = send_reset_email(email, reset_link)
+    if not ok:
+        return jsonify({'error': 'ไม่สามารถส่งอีเมลได้ กรุณาลองใหม่'}), 500
+    return jsonify({'message': 'ส่งลิงก์รีเซ็ตแล้ว'})
+
+@app.route('/api/verify-reset-token')
+def verify_reset_token():
+    token = request.args.get('token', '')
+    with get_db() as conn:
+        rec = conn.execute('SELECT * FROM reset_tokens WHERE token=?', (token,)).fetchone()
+        if not rec: return jsonify({'error': 'token ไม่ถูกต้อง'}), 400
         exp = datetime.strptime(rec['expires_at'].split('.')[0], '%Y-%m-%d %H:%M:%S')
-        if exp < datetime.now(): return jsonify({'error': 'รหัส OTP หมดอายุแล้ว'}), 400
-        store = conn.execute('SELECT id FROM stores WHERE email=?', (email,)).fetchone()
-        store_id = store['id'] if store else conn.execute('INSERT INTO stores (email) VALUES (?)', (email,)).lastrowid
-        session['store_id'] = store_id; session['email'] = email
-        conn.execute('DELETE FROM otps WHERE email=?', (email,)); conn.commit()
-    seed_mock_data(store_id)
-    return jsonify({'message': 'เข้าสู่ระบบสำเร็จ'})
+        if exp < datetime.now():
+            conn.execute('DELETE FROM reset_tokens WHERE token=?', (token,))
+            conn.commit()
+            return jsonify({'error': 'ลิงก์หมดอายุแล้ว'}), 400
+    return jsonify({'email': rec['email']})
+
+@app.route('/api/reset-password', methods=['POST'])
+def do_reset_password():
+    d = request.json
+    token    = (d.get('token') or '').strip()
+    password = (d.get('password') or '').strip()
+    if not token or not password:
+        return jsonify({'error': 'ข้อมูลไม่ครบ'}), 400
+    if len(password) < 6:
+        return jsonify({'error': 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'}), 400
+    with get_db() as conn:
+        rec = conn.execute('SELECT * FROM reset_tokens WHERE token=?', (token,)).fetchone()
+        if not rec: return jsonify({'error': 'token ไม่ถูกต้องหรือหมดอายุ'}), 400
+        exp = datetime.strptime(rec['expires_at'].split('.')[0], '%Y-%m-%d %H:%M:%S')
+        if exp < datetime.now():
+            conn.execute('DELETE FROM reset_tokens WHERE token=?', (token,)); conn.commit()
+            return jsonify({'error': 'ลิงก์หมดอายุแล้ว กรุณาขอใหม่'}), 400
+        conn.execute('UPDATE Stores SET password_hash=? WHERE email=?',
+                     (hash_password(password), rec['email']))
+        conn.execute('DELETE FROM reset_tokens WHERE token=?', (token,))
+        conn.commit()
+    return jsonify({'message': 'เปลี่ยนรหัสผ่านสำเร็จ'})
+
+@app.route('/reset-password')
+def reset_password_page():
+    return render_template('reset_password.html')
 
 # ================= PRODUCTS API =================
-@app.route('/api/products', methods=['GET','POST'])
+@app.route('/api/products', methods=['GET', 'POST'])
 def handle_products():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     with get_db() as conn:
         if request.method == 'GET':
-            rows = conn.execute('''SELECT p.*,c.name as category_name,s.name as supplier_name
-                FROM products p LEFT JOIN categories c ON p.category_id=c.id
-                LEFT JOIN suppliers s ON p.supplier_id=s.id
-                WHERE p.store_id=? ORDER BY p.name''', (store_id,)).fetchall()
+            rows = conn.execute(
+                'SELECT * FROM Products WHERE StoreID=? ORDER BY ProductName', (store_id,)
+            ).fetchall()
             return jsonify([dict(r) for r in rows])
         d = request.json
-        ex = conn.execute('SELECT * FROM products WHERE store_id=? AND barcode=?',(store_id,d.get('barcode'))).fetchone()
+        ex = conn.execute(
+            'SELECT * FROM Products WHERE StoreID=? AND QRCode=?', (store_id, d.get('QRCode'))
+        ).fetchone()
         if ex:
-            conn.execute('UPDATE products SET name=?,quantity=quantity+?,price=?,category_id=?,supplier_id=? WHERE id=?',
-                         (d['name'],int(d.get('quantity',0)),float(d.get('price',0)),d.get('category_id') or None,d.get('supplier_id') or None,ex['id']))
+            conn.execute(
+                'UPDATE Products SET ProductName=?, StockQty=StockQty+?, UnitPrice=? WHERE ProductID=?',
+                (d['ProductName'], int(d.get('StockQty', 0)), float(d.get('UnitPrice', 0)), ex['ProductID'])
+            )
         else:
-            conn.execute('INSERT INTO products (store_id,category_id,supplier_id,barcode,name,quantity,price) VALUES (?,?,?,?,?,?,?)',
-                         (store_id,d.get('category_id') or None,d.get('supplier_id') or None,d.get('barcode'),d['name'],int(d.get('quantity',0)),float(d.get('price',0))))
+            conn.execute(
+                'INSERT INTO Products (QRCode, ProductName, StockQty, UnitPrice, StoreID) VALUES (?,?,?,?,?)',
+                (d.get('QRCode'), d['ProductName'], int(d.get('StockQty', 0)), float(d.get('UnitPrice', 0)), store_id)
+            )
         conn.commit(); return jsonify({'message': 'บันทึกสำเร็จ'})
 
-@app.route('/api/products/<int:pid>', methods=['PUT','DELETE'])
+@app.route('/api/products/<int:pid>', methods=['PUT', 'DELETE'])
 def handle_product_detail(pid):
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     with get_db() as conn:
         if request.method == 'DELETE':
-            conn.execute('DELETE FROM products WHERE id=? AND store_id=?',(pid,store_id)); conn.commit()
-            return jsonify({'message': 'ลบสำเร็จ'})
+            conn.execute('DELETE FROM Products WHERE ProductID=? AND StoreID=?', (pid, store_id))
+            conn.commit(); return jsonify({'message': 'ลบสำเร็จ'})
         d = request.json
-        conn.execute('UPDATE products SET name=?,price=?,quantity=?,category_id=?,supplier_id=? WHERE id=? AND store_id=?',
-                     (d['name'],d['price'],d['quantity'],d.get('category_id') or None,d.get('supplier_id') or None,pid,store_id))
+        conn.execute(
+            'UPDATE Products SET ProductName=?, UnitPrice=?, StockQty=? WHERE ProductID=? AND StoreID=?',
+            (d['ProductName'], d['UnitPrice'], d['StockQty'], pid, store_id)
+        )
         conn.commit(); return jsonify({'message': 'อัปเดตสำเร็จ'})
 
+# ================= CHECKOUT (Orders + Order_Details + Payments) =================
 @app.route('/api/checkout', methods=['POST'])
 def checkout():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
-    d = request.json
+    d = request.json  # { items:[{QRCode, ProductName, qty, price}], payment_method }
     with get_db() as conn:
-        for item in d['items']:
-            conn.execute('UPDATE products SET quantity=quantity-? WHERE store_id=? AND barcode=?',(item['qty'],store_id,item['barcode']))
-            conn.execute('INSERT INTO sales (store_id,transaction_id,barcode,product_name,quantity,price_per_unit,total_price,sale_date) VALUES (?,?,?,?,?,?,?,?)',
-                         (store_id,d['transaction_id'],item['barcode'],item['name'],item['qty'],item['price'],item['qty']*item['price'],datetime.now()))
-        conn.commit()
-    return jsonify({'message': 'ขายสำเร็จ'})
+        total = sum(i['qty'] * i['price'] for i in d['items'])
+        order_id = conn.execute(
+            'INSERT INTO Orders (StoreID, OrderTime, TotalAmount, OrderStatus) VALUES (?,?,?,?)',
+            (store_id, datetime.now(), round(total, 2), 'Paid')
+        ).lastrowid
 
+        for item in d['items']:
+            prod = conn.execute(
+                'SELECT ProductID FROM Products WHERE StoreID=? AND QRCode=?', (store_id, item['QRCode'])
+            ).fetchone()
+            if prod:
+                conn.execute(
+                    'UPDATE Products SET StockQty=StockQty-? WHERE ProductID=? AND StoreID=?',
+                    (item['qty'], prod['ProductID'], store_id)
+                )
+                conn.execute(
+                    'INSERT INTO Order_Details (OrderID, ProductID, Quantity, SubTotal) VALUES (?,?,?,?)',
+                    (order_id, prod['ProductID'], item['qty'], round(item['qty'] * item['price'], 2))
+                )
+
+        method = d.get('payment_method', 'Cash')
+        conn.execute(
+            'INSERT INTO Payments (OrderID, PaymentMethod, AmountPaid, PaymentTime) VALUES (?,?,?,?)',
+            (order_id, method, round(total, 2), datetime.now())
+        )
+        conn.commit()
+    return jsonify({'message': 'ขายสำเร็จ', 'order_id': order_id})
+
+# ================= DASHBOARD SUMMARY =================
 @app.route('/api/dashboard-summary')
 def dashboard_summary():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     today = datetime.now().strftime('%Y-%m-%d')
     with get_db() as conn:
+        today_sales = conn.execute(
+            "SELECT COALESCE(SUM(TotalAmount),0) as v FROM Orders WHERE StoreID=? AND OrderStatus='Paid' AND strftime('%Y-%m-%d',OrderTime)=?",
+            (store_id, today)
+        ).fetchone()['v']
+        today_txn = conn.execute(
+            "SELECT COUNT(*) as c FROM Orders WHERE StoreID=? AND OrderStatus='Paid' AND strftime('%Y-%m-%d',OrderTime)=?",
+            (store_id, today)
+        ).fetchone()['c']
+        low_stock = conn.execute(
+            'SELECT COUNT(*) as c FROM Products WHERE StoreID=? AND StockQty<=5', (store_id,)
+        ).fetchone()['c']
+        total_products = conn.execute(
+            'SELECT COUNT(*) as c FROM Products WHERE StoreID=?', (store_id,)
+        ).fetchone()['c']
+        top_products = conn.execute(
+            '''SELECT p.ProductName, SUM(od.Quantity) as sold
+               FROM Order_Details od
+               JOIN Products p ON od.ProductID=p.ProductID
+               JOIN Orders o ON od.OrderID=o.OrderID
+               WHERE p.StoreID=? AND o.OrderStatus='Paid'
+               GROUP BY p.ProductID ORDER BY sold DESC LIMIT 5''', (store_id,)
+        ).fetchall()
+        low_items = conn.execute(
+            'SELECT ProductName as name, StockQty as quantity FROM Products WHERE StoreID=? AND StockQty<=5 ORDER BY StockQty ASC LIMIT 5',
+            (store_id,)
+        ).fetchall()
         return jsonify({
-            'today_sales':    conn.execute("SELECT COALESCE(SUM(total_price),0) as v FROM sales WHERE store_id=? AND strftime('%Y-%m-%d',sale_date)=?",(store_id,today)).fetchone()['v'],
-            'today_txn':      conn.execute("SELECT COUNT(DISTINCT transaction_id) as c FROM sales WHERE store_id=? AND strftime('%Y-%m-%d',sale_date)=?",(store_id,today)).fetchone()['c'],
-            'low_stock':      conn.execute('SELECT COUNT(*) as c FROM products WHERE store_id=? AND quantity<=5',(store_id,)).fetchone()['c'],
-            'total_products': conn.execute('SELECT COUNT(*) as c FROM products WHERE store_id=?',(store_id,)).fetchone()['c'],
-            'top_products':   [dict(r) for r in conn.execute('SELECT product_name,SUM(quantity) as sold FROM sales WHERE store_id=? GROUP BY product_name ORDER BY sold DESC LIMIT 5',(store_id,)).fetchall()],
-            'low_items':      [dict(r) for r in conn.execute('SELECT name,quantity FROM products WHERE store_id=? AND quantity<=5 ORDER BY quantity ASC LIMIT 5',(store_id,)).fetchall()],
+            'today_sales':    today_sales,
+            'today_txn':      today_txn,
+            'low_stock':      low_stock,
+            'total_products': total_products,
+            'top_products':   [dict(r) for r in top_products],
+            'low_items':      [dict(r) for r in low_items],
         })
 
+# ================= SALES SUMMARY (รายงาน) =================
 @app.route('/api/sales-summary')
 def get_summary():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
-    mode = request.args.get('mode','daily')
-    fmt = '%Y-%m-%d' if mode=='daily' else ('%Y-%m' if mode=='monthly' else '%Y')
+    mode = request.args.get('mode', 'daily')
+    fmt = '%Y-%m-%d' if mode == 'daily' else ('%Y-%m' if mode == 'monthly' else '%Y')
     with get_db() as conn:
-        res = conn.execute(f"SELECT strftime('{fmt}',sale_date) as label,SUM(total_price) as total FROM sales WHERE store_id=? GROUP BY label ORDER BY label DESC",(store_id,)).fetchall()
+        res = conn.execute(
+            f"SELECT strftime('{fmt}',OrderTime) as label, SUM(TotalAmount) as total, COUNT(*) as txn_count "
+            f"FROM Orders WHERE StoreID=? AND OrderStatus='Paid' GROUP BY label ORDER BY label DESC",
+            (store_id,)
+        ).fetchall()
         return jsonify([dict(r) for r in res])
 
+# ================= SALES DETAILS (บิลรายวัน) =================
 @app.route('/api/sales-details')
 def get_sales_details():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     date_label = request.args.get('date')
     with get_db() as conn:
-        rows = conn.execute("SELECT transaction_id,barcode,product_name,quantity,price_per_unit,total_price,strftime('%H:%M:%S',sale_date) as time_label FROM sales WHERE store_id=? AND strftime('%Y-%m-%d',sale_date)=? ORDER BY sale_date DESC",(store_id,date_label)).fetchall()
-        receipts = {}
-        for r in rows:
-            tid = r['transaction_id']
-            if tid not in receipts: receipts[tid] = {'time':r['time_label'],'items':[],'grand_total':0}
-            receipts[tid]['items'].append(dict(r)); receipts[tid]['grand_total'] += r['total_price']
-        return jsonify(receipts)
+        orders = conn.execute(
+            "SELECT o.OrderID, o.TotalAmount, o.OrderTime, p.PaymentMethod "
+            "FROM Orders o LEFT JOIN Payments p ON o.OrderID=p.OrderID "
+            "WHERE o.StoreID=? AND o.OrderStatus='Paid' AND strftime('%Y-%m-%d',o.OrderTime)=? "
+            "ORDER BY o.OrderTime DESC",
+            (store_id, date_label)
+        ).fetchall()
+        result = {}
+        for o in orders:
+            oid = o['OrderID']
+            items = conn.execute(
+                '''SELECT pr.ProductName, od.Quantity, pr.UnitPrice, od.SubTotal
+                   FROM Order_Details od JOIN Products pr ON od.ProductID=pr.ProductID
+                   WHERE od.OrderID=?''', (oid,)
+            ).fetchall()
+            result[f'ORDER-{oid}'] = {
+                'time': o['OrderTime'][11:19],
+                'payment_method': o['PaymentMethod'] or '-',
+                'grand_total': o['TotalAmount'],
+                'items': [{'product_name': i['ProductName'], 'quantity': i['Quantity'],
+                           'price_per_unit': i['UnitPrice'], 'total_price': i['SubTotal']} for i in items]
+            }
+        return jsonify(result)
 
+# ================= FINANCIAL SUMMARY =================
 @app.route('/api/financial-summary')
 def financial_summary():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     month = request.args.get('month', datetime.now().strftime('%Y-%m'))
     with get_db() as conn:
-        income  = conn.execute("SELECT COALESCE(SUM(total_price),0) as v FROM sales WHERE store_id=? AND strftime('%Y-%m',sale_date)=?",(store_id,month)).fetchone()['v']
-        expense = conn.execute("SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE store_id=? AND strftime('%Y-%m',expense_date)=?",(store_id,month)).fetchone()['v']
-        cost    = conn.execute("SELECT COALESCE(SUM(poi.quantity*poi.cost_price),0) as v FROM purchase_order_items poi JOIN purchase_orders po ON poi.order_id=po.id WHERE po.store_id=? AND strftime('%Y-%m',po.order_date)=?",(store_id,month)).fetchone()['v']
-        return jsonify({'month':month,'total_income':income,'total_expense':expense,'total_cost':cost,'net_profit':income-expense-cost})
+        income = conn.execute(
+            "SELECT COALESCE(SUM(TotalAmount),0) as v FROM Orders WHERE StoreID=? AND OrderStatus='Paid' AND strftime('%Y-%m',OrderTime)=?",
+            (store_id, month)
+        ).fetchone()['v']
+        cancelled = conn.execute(
+            "SELECT COUNT(*) as c FROM Orders WHERE StoreID=? AND OrderStatus='Cancelled' AND strftime('%Y-%m',OrderTime)=?",
+            (store_id, month)
+        ).fetchone()['c']
+        total_orders = conn.execute(
+            "SELECT COUNT(*) as c FROM Orders WHERE StoreID=? AND strftime('%Y-%m',OrderTime)=?",
+            (store_id, month)
+        ).fetchone()['c']
+        by_method = conn.execute(
+            "SELECT p.PaymentMethod, SUM(p.AmountPaid) as total FROM Payments p "
+            "JOIN Orders o ON p.OrderID=o.OrderID "
+            "WHERE o.StoreID=? AND strftime('%Y-%m',p.PaymentTime)=? GROUP BY p.PaymentMethod",
+            (store_id, month)
+        ).fetchall()
+        return jsonify({
+            'month': month,
+            'total_income': income,
+            'total_orders': total_orders,
+            'cancelled_orders': cancelled,
+            'net_profit': income,
+            'by_method': [dict(r) for r in by_method],
+        })
 
-# ================= CATEGORIES API =================
-@app.route('/api/categories', methods=['GET','POST'])
-def handle_categories():
+# ================= ORDERS API =================
+@app.route('/api/orders')
+def get_orders():
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     with get_db() as conn:
-        if request.method == 'GET':
-            return jsonify([dict(r) for r in conn.execute('SELECT * FROM categories WHERE store_id=? ORDER BY name',(store_id,)).fetchall()])
-        d = request.json
-        conn.execute('INSERT INTO categories (store_id,name,description) VALUES (?,?,?)',(store_id,d['name'],d.get('description','')))
-        conn.commit(); return jsonify({'message': 'เพิ่มสำเร็จ'})
+        rows = conn.execute(
+            '''SELECT o.*, p.PaymentMethod, p.AmountPaid, p.PaymentTime
+               FROM Orders o LEFT JOIN Payments p ON o.OrderID=p.OrderID
+               WHERE o.StoreID=? ORDER BY o.OrderTime DESC LIMIT 50''',
+            (store_id,)
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
 
-@app.route('/api/categories/<int:cid>', methods=['DELETE'])
-def delete_category(cid):
+@app.route('/api/orders/<int:oid>/cancel', methods=['POST'])
+def cancel_order(oid):
     store_id = session.get('store_id')
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     with get_db() as conn:
-        conn.execute('DELETE FROM categories WHERE id=? AND store_id=?',(cid,store_id)); conn.commit()
-    return jsonify({'message': 'ลบสำเร็จ'})
-
-# ================= SUPPLIERS API =================
-@app.route('/api/suppliers', methods=['GET','POST'])
-def handle_suppliers():
-    store_id = session.get('store_id')
-    if not store_id: return jsonify({'error': 'Unauthorized'}), 401
-    with get_db() as conn:
-        if request.method == 'GET':
-            return jsonify([dict(r) for r in conn.execute('SELECT * FROM suppliers WHERE store_id=? ORDER BY name',(store_id,)).fetchall()])
-        d = request.json
-        conn.execute('INSERT INTO suppliers (store_id,name,contact_phone,contact_email) VALUES (?,?,?,?)',(store_id,d['name'],d.get('contact_phone',''),d.get('contact_email','')))
-        conn.commit(); return jsonify({'message': 'เพิ่มสำเร็จ'})
-
-@app.route('/api/suppliers/<int:sid>', methods=['DELETE'])
-def delete_supplier(sid):
-    store_id = session.get('store_id')
-    if not store_id: return jsonify({'error': 'Unauthorized'}), 401
-    with get_db() as conn:
-        conn.execute('DELETE FROM suppliers WHERE id=? AND store_id=?',(sid,store_id)); conn.commit()
-    return jsonify({'message': 'ลบสำเร็จ'})
-
-# ================= PURCHASE ORDERS API =================
-@app.route('/api/purchase-orders', methods=['GET','POST'])
-def handle_purchase_orders():
-    store_id = session.get('store_id')
-    if not store_id: return jsonify({'error': 'Unauthorized'}), 401
-    with get_db() as conn:
-        if request.method == 'GET':
-            rows = conn.execute('SELECT po.*,s.name as supplier_name FROM purchase_orders po JOIN suppliers s ON po.supplier_id=s.id WHERE po.store_id=? ORDER BY po.order_date DESC',(store_id,)).fetchall()
-            return jsonify([dict(r) for r in rows])
-        d = request.json
-        total = sum(i['quantity']*i['cost_price'] for i in d['items'])
-        po_id = conn.execute('INSERT INTO purchase_orders (store_id,supplier_id,order_date,total_amount,status) VALUES (?,?,?,?,?)',(store_id,d['supplier_id'],datetime.now(),total,'received')).lastrowid
-        for item in d['items']:
-            conn.execute('INSERT INTO purchase_order_items (order_id,product_id,quantity,cost_price) VALUES (?,?,?,?)',(po_id,item['product_id'],item['quantity'],item['cost_price']))
-            conn.execute('UPDATE products SET quantity=quantity+? WHERE id=? AND store_id=?',(item['quantity'],item['product_id'],store_id))
-        conn.commit(); return jsonify({'message': 'สร้างใบสั่งซื้อสำเร็จ'})
-
-# ================= EXPENSES API =================
-@app.route('/api/expenses', methods=['GET','POST'])
-def handle_expenses():
-    store_id = session.get('store_id')
-    if not store_id: return jsonify({'error': 'Unauthorized'}), 401
-    with get_db() as conn:
-        if request.method == 'GET':
-            return jsonify([dict(r) for r in conn.execute('SELECT * FROM expenses WHERE store_id=? ORDER BY expense_date DESC',(store_id,)).fetchall()])
-        d = request.json
-        conn.execute('INSERT INTO expenses (store_id,amount,description,expense_date) VALUES (?,?,?,?)',(store_id,d['amount'],d['description'],datetime.now()))
-        conn.commit(); return jsonify({'message': 'บันทึกสำเร็จ'})
-
-@app.route('/api/expenses/<int:eid>', methods=['DELETE'])
-def delete_expense(eid):
-    store_id = session.get('store_id')
-    if not store_id: return jsonify({'error': 'Unauthorized'}), 401
-    with get_db() as conn:
-        conn.execute('DELETE FROM expenses WHERE id=? AND store_id=?',(eid,store_id)); conn.commit()
-    return jsonify({'message': 'ลบสำเร็จ'})
+        order = conn.execute('SELECT * FROM Orders WHERE OrderID=? AND StoreID=?', (oid, store_id)).fetchone()
+        if not order: return jsonify({'error': 'ไม่พบออร์เดอร์'}), 404
+        if order['OrderStatus'] != 'Pending':
+            return jsonify({'error': 'ยกเลิกได้เฉพาะออร์เดอร์ที่ยังไม่ชำระ'}), 400
+        conn.execute("UPDATE Orders SET OrderStatus='Cancelled' WHERE OrderID=?", (oid,))
+        conn.commit()
+    return jsonify({'message': 'ยกเลิกสำเร็จ'})
 
 # ================= ADMIN: Google OAuth =================
 def admin_required(f):
@@ -404,31 +592,23 @@ def admin_callback():
         if not user_info:
             resp = google.get('https://openidconnect.googleapis.com/v1/userinfo')
             user_info = resp.json()
-
         email = user_info.get('email', '').lower().strip()
-
-        # ✅ เช็คเฉพาะอีเมลที่อยู่ใน .env เท่านั้น
         if email != ADMIN_EMAIL:
             return render_template('admin_login.html',
                 error=f'อีเมล {email} ไม่มีสิทธิ์เข้าใช้งาน Admin Panel')
-
         session['is_admin']      = True
         session['admin_email']   = email
         session['admin_name']    = user_info.get('name', email)
         session['admin_picture'] = user_info.get('picture', '')
         return redirect('/admin')
-
     except Exception as e:
         print(f'OAuth Error: {e}')
-        return render_template('admin_login.html',
-            error='เกิดข้อผิดพลาดในการเข้าสู่ระบบ กรุณาลองใหม่')
+        return render_template('admin_login.html', error='เกิดข้อผิดพลาดในการเข้าสู่ระบบ กรุณาลองใหม่')
 
 @app.route('/admin/logout')
 def admin_logout():
-    session.pop('is_admin', None)
-    session.pop('admin_email', None)
-    session.pop('admin_name', None)
-    session.pop('admin_picture', None)
+    session.pop('is_admin', None); session.pop('admin_email', None)
+    session.pop('admin_name', None); session.pop('admin_picture', None)
     return redirect('/admin/login')
 
 @app.route('/admin')
@@ -447,58 +627,71 @@ def admin_overview():
     today = datetime.now().strftime('%Y-%m-%d')
     with get_db() as conn:
         return jsonify({
-            'total_stores':       conn.execute('SELECT COUNT(*) as c FROM stores').fetchone()['c'],
-            'total_sales':        conn.execute('SELECT COALESCE(SUM(total_price),0) as v FROM sales').fetchone()['v'],
-            'total_products':     conn.execute('SELECT COUNT(*) as c FROM products').fetchone()['c'],
-            'total_transactions': conn.execute('SELECT COUNT(DISTINCT transaction_id) as c FROM sales').fetchone()['c'],
-            'today_sales':        conn.execute("SELECT COALESCE(SUM(total_price),0) as v FROM sales WHERE strftime('%Y-%m-%d',sale_date)=?",(today,)).fetchone()['v'],
-            'sales_by_day':       [dict(r) for r in conn.execute("SELECT strftime('%Y-%m-%d',sale_date) as label,SUM(total_price) as total FROM sales GROUP BY label ORDER BY label DESC LIMIT 14").fetchall()],
-            'top_stores':         [dict(r) for r in conn.execute('SELECT st.email,COALESCE(SUM(s.total_price),0) as revenue,COUNT(DISTINCT s.transaction_id) as txn FROM stores st LEFT JOIN sales s ON st.id=s.store_id GROUP BY st.id ORDER BY revenue DESC LIMIT 10').fetchall()],
+            'total_stores':   conn.execute('SELECT COUNT(*) as c FROM Stores WHERE email IS NOT NULL').fetchone()['c'],
+            'total_sales':    conn.execute("SELECT COALESCE(SUM(TotalAmount),0) as v FROM Orders WHERE OrderStatus='Paid'").fetchone()['v'],
+            'total_products': conn.execute('SELECT COUNT(*) as c FROM Products').fetchone()['c'],
+            'total_orders':   conn.execute('SELECT COUNT(*) as c FROM Orders').fetchone()['c'],
+            'today_sales':    conn.execute(
+                "SELECT COALESCE(SUM(TotalAmount),0) as v FROM Orders WHERE OrderStatus='Paid' AND strftime('%Y-%m-%d',OrderTime)=?",
+                (today,)
+            ).fetchone()['v'],
+            'sales_by_day':   [dict(r) for r in conn.execute(
+                "SELECT strftime('%Y-%m-%d',OrderTime) as label, SUM(TotalAmount) as total "
+                "FROM Orders WHERE OrderStatus='Paid' GROUP BY label ORDER BY label DESC LIMIT 14"
+            ).fetchall()],
+            'top_stores':     [dict(r) for r in conn.execute(
+                '''SELECT s.StoreName, s.email,
+                   COALESCE(SUM(o.TotalAmount),0) as revenue,
+                   COUNT(DISTINCT o.OrderID) as txn
+                   FROM Stores s LEFT JOIN Orders o ON s.StoreID=o.StoreID AND o.OrderStatus='Paid'
+                   WHERE s.email IS NOT NULL
+                   GROUP BY s.StoreID ORDER BY revenue DESC LIMIT 10'''
+            ).fetchall()],
         })
 
 @app.route('/admin/api/stores')
 @admin_required
 def admin_stores():
     with get_db() as conn:
-        rows = conn.execute('''SELECT st.id, st.email, st.created_at,
-            COUNT(DISTINCT p.id) as product_count,
-            COUNT(DISTINCT s.transaction_id) as txn_count,
-            COALESCE(SUM(s.total_price),0) as revenue
-            FROM stores st
-            LEFT JOIN products p ON st.id=p.store_id
-            LEFT JOIN sales s ON st.id=s.store_id
-            GROUP BY st.id ORDER BY st.created_at DESC''').fetchall()
+        rows = conn.execute('''
+            SELECT s.StoreID as id, s.StoreName, s.email, s.created_at,
+                COUNT(DISTINCT p.ProductID) as product_count,
+                COUNT(DISTINCT o.OrderID) as txn_count,
+                COALESCE(SUM(CASE WHEN o.OrderStatus='Paid' THEN o.TotalAmount ELSE 0 END),0) as revenue
+            FROM Stores s
+            LEFT JOIN Products p ON s.StoreID=p.StoreID
+            LEFT JOIN Orders o ON s.StoreID=o.StoreID
+            WHERE s.email IS NOT NULL
+            GROUP BY s.StoreID ORDER BY s.created_at DESC
+        ''').fetchall()
         return jsonify([dict(r) for r in rows])
 
 @app.route('/admin/api/stores/<int:store_id>', methods=['DELETE'])
 @admin_required
 def admin_delete_store(store_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM sales WHERE store_id=?',(store_id,))
-        conn.execute('DELETE FROM expenses WHERE store_id=?',(store_id,))
-        conn.execute('DELETE FROM purchase_order_items WHERE order_id IN (SELECT id FROM purchase_orders WHERE store_id=?)',(store_id,))
-        conn.execute('DELETE FROM purchase_orders WHERE store_id=?',(store_id,))
-        conn.execute('DELETE FROM products WHERE store_id=?',(store_id,))
-        conn.execute('DELETE FROM categories WHERE store_id=?',(store_id,))
-        conn.execute('DELETE FROM suppliers WHERE store_id=?',(store_id,))
-        conn.execute('DELETE FROM stores WHERE id=?',(store_id,))
+        conn.execute('DELETE FROM Payments WHERE OrderID IN (SELECT OrderID FROM Orders WHERE StoreID=?)', (store_id,))
+        conn.execute('DELETE FROM Order_Details WHERE OrderID IN (SELECT OrderID FROM Orders WHERE StoreID=?)', (store_id,))
+        conn.execute('DELETE FROM Orders WHERE StoreID=?', (store_id,))
+        conn.execute('DELETE FROM Products WHERE StoreID=?', (store_id,))
+        conn.execute('DELETE FROM Stores WHERE StoreID=?', (store_id,))
         conn.commit()
     return jsonify({'message': 'ลบร้านค้าสำเร็จ'})
 
 @app.route('/admin/api/sql', methods=['POST'])
 @admin_required
 def admin_sql():
-    query = request.json.get('query','').strip()
+    query = request.json.get('query', '').strip()
     if not query: return jsonify({'error': 'กรุณาระบุ SQL Query'}), 400
     try:
         with get_db() as conn:
             cursor = conn.execute(query)
-            if query.upper().lstrip().startswith(('SELECT','PRAGMA')):
+            if query.upper().lstrip().startswith(('SELECT', 'PRAGMA')):
                 rows = cursor.fetchall()
-                if not rows: return jsonify({'columns':[],'rows':[],'message':'ไม่มีข้อมูล','affected':0})
-                return jsonify({'columns':list(rows[0].keys()),'rows':[list(r) for r in rows],'affected':len(rows),'message':''})
+                if not rows: return jsonify({'columns': [], 'rows': [], 'message': 'ไม่มีข้อมูล', 'affected': 0})
+                return jsonify({'columns': list(rows[0].keys()), 'rows': [list(r) for r in rows], 'affected': len(rows), 'message': ''})
             conn.commit()
-            return jsonify({'columns':[],'rows':[],'message':f'สำเร็จ: {cursor.rowcount} แถวถูกเปลี่ยนแปลง','affected':cursor.rowcount})
+            return jsonify({'columns': [], 'rows': [], 'message': f'สำเร็จ: {cursor.rowcount} แถวถูกเปลี่ยนแปลง', 'affected': cursor.rowcount})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -507,7 +700,7 @@ def admin_sql():
 def admin_tables():
     with get_db() as conn:
         tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
-        return jsonify({t['name']: conn.execute(f"SELECT COUNT(*) as c FROM {t['name']}").fetchone()['c'] for t in tables})
+        return jsonify({t['name']: conn.execute(f"SELECT COUNT(*) as c FROM '{t['name']}'").fetchone()['c'] for t in tables})
 
 if __name__ == '__main__':
     app.run(debug=True)

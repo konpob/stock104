@@ -88,7 +88,7 @@
                     <p id="ov-today" class="text-3xl font-black mt-2">—</p>
                 </div>
                 <div class="bg-gradient-to-br from-orange-500 to-amber-600 rounded-2xl p-5">
-                    <p class="text-xs text-orange-200 font-bold uppercase">บิลทั้งหมด</p>
+                    <p class="text-xs text-orange-200 font-bold uppercase">ออร์เดอร์ทั้งหมด</p>
                     <p id="ov-txn" class="text-3xl font-black mt-2">—</p>
                 </div>
             </div>
@@ -146,15 +146,13 @@
 
             <!-- Quick Query Buttons -->
             <div class="flex flex-wrap gap-2">
-                <button onclick="setQuery('SELECT * FROM stores ORDER BY created_at DESC')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">stores</button>
-                <button onclick="setQuery('SELECT * FROM products LIMIT 20')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">products</button>
-                <button onclick="setQuery('SELECT * FROM sales ORDER BY sale_date DESC LIMIT 20')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">sales</button>
-                <button onclick="setQuery('SELECT * FROM expenses ORDER BY expense_date DESC LIMIT 20')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">expenses</button>
-                <button onclick="setQuery('SELECT * FROM categories')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">categories</button>
-                <button onclick="setQuery('SELECT * FROM suppliers')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">suppliers</button>
-                <button onclick="setQuery('SELECT * FROM purchase_orders ORDER BY order_date DESC LIMIT 20')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">purchase_orders</button>
-                <button onclick="setQuery(`SELECT st.email, COUNT(DISTINCT p.id) as products, COALESCE(SUM(s.total_price),0) as revenue\nFROM stores st\nLEFT JOIN products p ON st.id=p.store_id\nLEFT JOIN sales s ON st.id=s.store_id\nGROUP BY st.id\nORDER BY revenue DESC`)" class="text-xs bg-blue-900/50 hover:bg-blue-800/50 border border-blue-700/50 px-3 py-1.5 rounded-lg transition-all mono">JOIN report</button>
-                <button onclick="setQuery(`SELECT product_name, SUM(quantity) as total_sold, SUM(total_price) as revenue\nFROM sales\nGROUP BY product_name\nORDER BY total_sold DESC\nLIMIT 10`)" class="text-xs bg-green-900/50 hover:bg-green-800/50 border border-green-700/50 px-3 py-1.5 rounded-lg transition-all mono">top products</button>
+                <button onclick="setQuery('SELECT * FROM Stores ORDER BY created_at DESC')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">Stores</button>
+                <button onclick="setQuery('SELECT * FROM Products LIMIT 20')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">Products</button>
+                <button onclick="setQuery('SELECT * FROM Orders ORDER BY OrderTime DESC LIMIT 20')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">Orders</button>
+                <button onclick="setQuery('SELECT * FROM Order_Details LIMIT 20')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">Order_Details</button>
+                <button onclick="setQuery('SELECT * FROM Payments ORDER BY PaymentTime DESC LIMIT 20')" class="text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700/50 px-3 py-1.5 rounded-lg transition-all mono">Payments</button>
+                <button onclick="setQuery(`SELECT s.StoreName, s.email, COUNT(DISTINCT o.OrderID) as orders, COALESCE(SUM(o.TotalAmount),0) as revenue\nFROM Stores s\nLEFT JOIN Orders o ON s.StoreID=o.StoreID AND o.OrderStatus='Paid'\nGROUP BY s.StoreID\nORDER BY revenue DESC`)" class="text-xs bg-blue-900/50 hover:bg-blue-800/50 border border-blue-700/50 px-3 py-1.5 rounded-lg transition-all mono">JOIN report</button>
+                <button onclick="setQuery(`SELECT p.ProductName, SUM(od.Quantity) as total_sold, SUM(od.SubTotal) as revenue\nFROM Order_Details od\nJOIN Products p ON od.ProductID=p.ProductID\nJOIN Orders o ON od.OrderID=o.OrderID\nWHERE o.OrderStatus='Paid'\nGROUP BY p.ProductID\nORDER BY total_sold DESC\nLIMIT 10`)" class="text-xs bg-green-900/50 hover:bg-green-800/50 border border-green-700/50 px-3 py-1.5 rounded-lg transition-all mono">top products</button>
             </div>
 
             <!-- Input Area -->
@@ -227,7 +225,7 @@ async function loadOverview() {
     document.getElementById('ov-stores').textContent = d.total_stores;
     document.getElementById('ov-sales').textContent = '฿' + d.total_sales.toLocaleString();
     document.getElementById('ov-today').textContent = '฿' + d.today_sales.toLocaleString();
-    document.getElementById('ov-txn').textContent = d.total_transactions.toLocaleString();
+    document.getElementById('ov-txn').textContent = d.total_orders.toLocaleString();
 
     document.getElementById('top-stores').innerHTML = d.top_stores.length
         ? d.top_stores.map((s, i) => `
@@ -235,8 +233,9 @@ async function loadOverview() {
                 <div class="flex items-center gap-3">
                     <span class="text-xs font-black text-gray-600 w-4">${i+1}</span>
                     <div>
-                        <p class="text-sm font-bold text-white truncate max-w-[160px]">${s.email}</p>
-                        <p class="text-[10px] text-gray-500">${s.txn} บิล</p>
+                        <p class="text-sm font-bold text-white truncate max-w-[160px]">${s.StoreName||s.email}</p>
+                        <p class="text-[10px] text-gray-500">${s.email||''}</p>
+                        <p class="text-[10px] text-gray-600">${s.txn} ออร์เดอร์</p>
                     </div>
                 </div>
                 <span class="text-sm font-black text-green-400">฿${s.revenue.toLocaleString()}</span>
