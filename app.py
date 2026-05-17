@@ -44,13 +44,6 @@ def get_db():
 
 def init_db():
     with get_db() as conn:
-        # OTP table (auth helper — ไม่ใช่ตารางหลักของธุรกิจ)
-        conn.execute('''CREATE TABLE IF NOT EXISTS otps (
-            email TEXT PRIMARY KEY,
-            code TEXT NOT NULL,
-            expires_at DATETIME NOT NULL
-        )''')
-
         # 1. Stores
         conn.execute('''CREATE TABLE IF NOT EXISTS Stores (
             StoreID       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,11 +97,9 @@ def init_db():
             FOREIGN KEY(OrderID) REFERENCES Orders(OrderID)
         )''')
 
-        conn.execute('''CREATE TABLE IF NOT EXISTS reset_tokens (
-            token      TEXT PRIMARY KEY,
-            email      TEXT NOT NULL,
-            expires_at DATETIME NOT NULL
-        )''')
+        # ลบตารางเก่าที่ไม่ใช้แล้ว (migration)
+        conn.execute('DROP TABLE IF EXISTS otps')
+        conn.execute('DROP TABLE IF EXISTS reset_tokens')
         conn.commit()
 
 # ---- Seed mock data (ตารางละ 10 records) ----
