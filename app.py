@@ -252,99 +252,6 @@ def update_store_info():
         conn.commit()
     return jsonify({'message': 'บันทึกข้อมูลร้านค้าสำเร็จ'})
 
-# ================= FORGOT / RESET PASSWORD =================
-def send_reset_email(to_email, reset_link):
-    try:
-        payload = {
-            'personalizations': [{'to': [{'email': to_email}]}],
-            'from': {'email': MAIL_FROM, 'name': 'Stock Manager'},
-            'subject': 'รีเซ็ตรหัสผ่าน — Stock Manager',
-            'content': [{
-                'type': 'text/html',
-                'value': f'''
-                <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f8f9fe;border-radius:16px">
-                    <h2 style="color:#7c5cfc;margin-bottom:8px">🔑 รีเซ็ตรหัสผ่าน</h2>
-                    <p style="color:#444;line-height:1.6">คุณได้ขอรีเซ็ตรหัสผ่านสำหรับระบบจัดการร้านค้า</p>
-                    <a href="{reset_link}" style="display:inline-block;margin:20px 0;padding:14px 28px;background:linear-gradient(135deg,#7c5cfc,#a78bfa);color:white;text-decoration:none;border-radius:12px;font-weight:bold">
-                        ตั้งรหัสผ่านใหม่
-                    </a>
-                    <p style="color:#888;font-size:13px">ลิงก์หมดอายุใน 30 นาที<br>หากคุณไม่ได้ขอรีเซ็ต กรุณาเพิกเฉยต่ออีเมลนี้</p>
-                </div>'''
-            }]
-        }
-        res = requests.post(
-            'https://api.sendgrid.com/v3/mail/send',
-            json=payload,
-            headers={'Authorization': f'Bearer {SENDGRID_API_KEY}', 'Content-Type': 'application/json'},
-            timeout=10
-        )
-        if res.status_code not in (200, 202):
-            print(f'SendGrid Error: {res.status_code} {res.text}')
-            return False
-        return True
-    except Exception as e:
-        print(f'Mail Error: {e}')
-        return False
-
-@app.route('/api/forgot-password', methods=['POST'])
-def forgot_password():
-    email = (request.json.get('email') or '').strip().lower()
-    if not email: return jsonify({'error': 'กรุณากรอกอีเมล'}), 400
-    with get_db() as conn:
-        store = conn.execute('SELECT StoreID FROM Stores WHERE email=?', (email,)).fetchone()
-        if not store:
-            # ไม่บอกว่าอีเมลไม่มีในระบบ (security)
-            return jsonify({'message': 'ส่งลิงก์รีเซ็ตแล้ว (ถ้าอีเมลนี้มีในระบบ)'}), 200
-        token = secrets.token_urlsafe(32)
-        expires_at = datetime.now() + timedelta(minutes=30)
-        conn.execute('DELETE FROM reset_tokens WHERE email=?', (email,))
-        conn.execute('INSERT INTO reset_tokens (token, email, expires_at) VALUES (?,?,?)',
-                     (token, email, expires_at))
-        conn.commit()
-    reset_link = url_for('reset_password_page', token=token, _external=True)
-    ok = send_reset_email(email, reset_link)
-    if not ok:
-        return jsonify({'error': 'ไม่สามารถส่งอีเมลได้ กรุณาลองใหม่'}), 500
-    return jsonify({'message': 'ส่งลิงก์รีเซ็ตแล้ว'})
-
-@app.route('/api/verify-reset-token')
-def verify_reset_token():
-    token = request.args.get('token', '')
-    with get_db() as conn:
-        rec = conn.execute('SELECT * FROM reset_tokens WHERE token=?', (token,)).fetchone()
-        if not rec: return jsonify({'error': 'token ไม่ถูกต้อง'}), 400
-        exp = datetime.strptime(rec['expires_at'].split('.')[0], '%Y-%m-%d %H:%M:%S')
-        if exp < datetime.now():
-            conn.execute('DELETE FROM reset_tokens WHERE token=?', (token,))
-            conn.commit()
-            return jsonify({'error': 'ลิงก์หมดอายุแล้ว'}), 400
-    return jsonify({'email': rec['email']})
-
-@app.route('/api/reset-password', methods=['POST'])
-def do_reset_password():
-    d = request.json
-    token    = (d.get('token') or '').strip()
-    password = (d.get('password') or '').strip()
-    if not token or not password:
-        return jsonify({'error': 'ข้อมูลไม่ครบ'}), 400
-    if len(password) < 6:
-        return jsonify({'error': 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'}), 400
-    with get_db() as conn:
-        rec = conn.execute('SELECT * FROM reset_tokens WHERE token=?', (token,)).fetchone()
-        if not rec: return jsonify({'error': 'token ไม่ถูกต้องหรือหมดอายุ'}), 400
-        exp = datetime.strptime(rec['expires_at'].split('.')[0], '%Y-%m-%d %H:%M:%S')
-        if exp < datetime.now():
-            conn.execute('DELETE FROM reset_tokens WHERE token=?', (token,)); conn.commit()
-            return jsonify({'error': 'ลิงก์หมดอายุแล้ว กรุณาขอใหม่'}), 400
-        conn.execute('UPDATE Stores SET password_hash=? WHERE email=?',
-                     (hash_password(password), rec['email']))
-        conn.execute('DELETE FROM reset_tokens WHERE token=?', (token,))
-        conn.commit()
-    return jsonify({'message': 'เปลี่ยนรหัสผ่านสำเร็จ'})
-
-@app.route('/reset-password')
-def reset_password_page():
-    return render_template('reset_password.html')
 
 # ================= PRODUCTS API =================
 @app.route('/api/products', methods=['GET', 'POST'])
@@ -683,7 +590,7 @@ def admin_overview():
 def admin_stores():
     with get_db() as conn:
         rows = conn.execute('''
-            SELECT s.StoreID as id, s.StoreName, s.email, s.created_at,
+            SELECT s.StoreID as id, s.StoreName, s.Phone, s.Address, s.email, s.created_at,
                 COUNT(DISTINCT p.ProductID) as product_count,
                 COUNT(DISTINCT o.OrderID) as txn_count,
                 COALESCE(SUM(CASE WHEN o.OrderStatus='Paid' THEN o.TotalAmount ELSE 0 END),0) as revenue
@@ -694,6 +601,30 @@ def admin_stores():
             GROUP BY s.StoreID ORDER BY s.created_at DESC
         ''').fetchall()
         return jsonify([dict(r) for r in rows])
+
+@app.route('/admin/api/stores/<int:store_id>', methods=['PUT'])
+@admin_required
+def admin_edit_store(store_id):
+    d = request.json
+    name = (d.get('store_name') or '').strip()
+    if not name: return jsonify({'error': 'กรุณาระบุชื่อร้านค้า'}), 400
+    with get_db() as conn:
+        store = conn.execute('SELECT * FROM Stores WHERE StoreID=?', (store_id,)).fetchone()
+        if not store: return jsonify({'error': 'ไม่พบร้านค้า'}), 404
+        if d.get('password'):
+            if len(d['password']) < 6:
+                return jsonify({'error': 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'}), 400
+            conn.execute(
+                'UPDATE Stores SET StoreName=?, Phone=?, Address=?, password_hash=? WHERE StoreID=?',
+                (name, d.get('phone',''), d.get('address',''), hash_password(d['password']), store_id)
+            )
+        else:
+            conn.execute(
+                'UPDATE Stores SET StoreName=?, Phone=?, Address=? WHERE StoreID=?',
+                (name, d.get('phone',''), d.get('address',''), store_id)
+            )
+        conn.commit()
+    return jsonify({'message': 'อัปเดตสำเร็จ'})
 
 @app.route('/admin/api/stores/<int:store_id>', methods=['DELETE'])
 @admin_required

@@ -57,10 +57,6 @@
         .skip-link{text-align:center;font-size:12px;color:var(--muted);margin-top:12px;cursor:pointer}
         .skip-link:hover{color:var(--accent)}
         @media(max-width:440px){.card{padding:28px 20px;border-radius:24px}}
-        .forgot-link{text-align:right;font-size:12px;color:var(--accent);cursor:pointer;margin-top:-8px;margin-bottom:14px;display:none}
-        .forgot-link:hover{text-decoration:underline}
-        .success-box{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px 16px;font-size:13px;color:#166534;margin-bottom:14px;display:none;text-align:center;line-height:1.6}
-        .success-box.show{display:block}
     </style>
 </head>
 <body>
@@ -106,7 +102,6 @@
             </div>
             <div class="match-hint" id="match-hint"></div>
         </div>
-        <p class="forgot-link" id="forgot-link" onclick="goToPanel('forgot')">ลืมรหัสผ่าน?</p>
         <button class="btn btn-primary" id="btn-auth" onclick="submitAuth()">
             <span id="btn-label">เข้าสู่ระบบ</span><span>&#8594;</span>
         </button>
@@ -142,24 +137,6 @@
         <p class="skip-link" onclick="goToDashboard()">ข้ามไปก่อน กรอกทีหลัง &#8594;</p>
     </div>
 
-    <!-- PANEL 3: FORGOT PASSWORD -->
-    <div class="panel" id="panel-forgot">
-        <h1>&#128272; ลืมรหัสผ่าน</h1>
-        <p class="subtitle">กรอกอีเมลที่ใช้สมัคร<br>เราจะส่งลิงก์รีเซ็ตรหัสผ่านให้</p>
-        <div class="err" id="err-forgot"></div>
-        <div class="success-box" id="success-forgot"></div>
-        <div class="field" id="forgot-email-field">
-            <div class="field-label">อีเมล</div>
-            <div class="input-wrap">
-                <span class="input-icon">&#9993;&#65039;</span>
-                <input type="email" id="forgot-email" placeholder="example@gmail.com">
-            </div>
-        </div>
-        <button class="btn btn-primary" id="btn-forgot" onclick="submitForgot()">
-            <span id="btn-forgot-label">ส่งลิงก์รีเซ็ต</span><span>&#128140;</span>
-        </button>
-        <button class="btn btn-ghost" onclick="goToPanel('auth')">&#8592; กลับเข้าสู่ระบบ</button>
-    </div>
 </div>
 
 <script>
@@ -178,13 +155,12 @@ function setMode(mode) {
     document.getElementById('strength-label').style.display = mode === 'register' ? 'block' : 'none';
     hideErr('err-auth');
     document.getElementById('match-hint').textContent = '';
-    document.getElementById('forgot-link').style.display = mode === 'login' ? 'block' : 'none';
 }
 
 function goToPanel(panel) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     document.getElementById('panel-' + panel).classList.add('active');
-    const dotMap = { auth: 0, store: 1, forgot: -1 };
+    const dotMap = { auth: 0, store: 1 };
     const idx = dotMap[panel] ?? 0;
     document.querySelectorAll('.dot').forEach((d, i) => {
         d.className = 'dot';
@@ -193,16 +169,7 @@ function goToPanel(panel) {
             else if (i === idx) d.classList.add('active');
         }
     });
-    // reset forgot form when leaving
-    if (panel !== 'forgot') {
-        document.getElementById('err-forgot').classList.remove('show');
-        document.getElementById('success-forgot').classList.remove('show');
-        document.getElementById('forgot-email').value = '';
-        document.getElementById('forgot-email-field').style.display = 'block';
-        document.getElementById('btn-forgot').style.display = 'flex';
-        document.getElementById('btn-forgot-label').textContent = 'ส่งลิงก์รีเซ็ต';
-        document.getElementById('btn-forgot').disabled = false;
-    }
+
 }
 
 function checkStrength() {
@@ -295,31 +262,6 @@ async function saveStoreInfo() {
     else { const d = await res.json(); showErr('err-store', d.error || 'บันทึกไม่สำเร็จ'); }
 }
 
-async function submitForgot() {
-    const email = document.getElementById('forgot-email').value.trim();
-    hideErr('err-forgot');
-    document.getElementById('success-forgot').classList.remove('show');
-    if (!email) return showErr('err-forgot', 'กรุณากรอกอีเมล');
-    if (!email.includes('@')) return showErr('err-forgot', 'รูปแบบอีเมลไม่ถูกต้อง');
-    const btn = document.getElementById('btn-forgot');
-    btn.disabled = true;
-    document.getElementById('btn-forgot-label').textContent = 'กำลังส่ง...';
-    const res = await fetch('/api/forgot-password', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({email})
-    });
-    btn.disabled = false;
-    document.getElementById('btn-forgot-label').textContent = 'ส่งลิงก์รีเซ็ต';
-    const data = await res.json();
-    if (!res.ok) return showErr('err-forgot', data.error || 'เกิดข้อผิดพลาด');
-    // ซ่อน form แสดง success
-    document.getElementById('forgot-email-field').style.display = 'none';
-    document.getElementById('btn-forgot').style.display = 'none';
-    const box = document.getElementById('success-forgot');
-    box.innerHTML = '&#9989; ส่งลิงก์รีเซ็ตไปที่<br><strong>' + email + '</strong><br><span style="font-size:12px;color:#166534">ลิงก์หมดอายุใน 30 นาที</span>';
-    box.classList.add('show');
-}
-
 function goToDashboard() { window.location.href = '/dashboard'; }
 
 document.addEventListener('keydown', e => {
@@ -327,13 +269,9 @@ document.addEventListener('keydown', e => {
     const p = document.querySelector('.panel.active').id;
     if (p === 'panel-auth') submitAuth();
     else if (p === 'panel-store') saveStoreInfo();
-    else if (p === 'panel-forgot') submitForgot();
 });
 
-window.onload = () => {
-    document.getElementById('auth-email').focus();
-    document.getElementById('forgot-link').style.display = 'block';
-};
+window.onload = () => document.getElementById('auth-email').focus();
 </script>
 </body>
 </html>
