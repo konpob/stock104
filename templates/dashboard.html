@@ -24,6 +24,9 @@
         .modal-sheet { background:white; border-radius:24px 24px 0 0; padding:24px; width:100%; max-height:90vh; overflow-y:auto; }
         .bottom-safe { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
         input, select, textarea { font-family: 'Kanit', sans-serif; }
+        .qr-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:300; align-items:center; justify-content:center; padding:20px; }
+        .qr-modal.open { display:flex; }
+        .qr-box { background:white; border-radius:24px; padding:28px 24px; width:100%; max-width:340px; text-align:center; }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -118,7 +121,7 @@
             <p class="text-xs text-gray-400">ยอดรวม</p>
             <p class="text-xl font-black text-violet-700">฿<span id="cart-total">0.00</span></p>
         </div>
-        <button onclick="processCheckout()" class="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-2xl font-black text-sm shadow-lg shadow-violet-200 active:scale-95 transition-all">
+        <button onclick="processCheckout()" id="btn-checkout" class="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-2xl font-black text-sm shadow-lg shadow-violet-200 active:scale-95 transition-all">
             ✅ ยืนยันชำระเงิน
         </button>
     </div>
@@ -203,6 +206,27 @@
         </button>
     </div>
 </nav>
+
+<!-- QR Payment Modal -->
+<div id="qr-modal" class="qr-modal">
+    <div class="qr-box space-y-4">
+        <p class="font-black text-gray-800 text-lg">📱 QR PromptPay</p>
+        <p class="text-xs text-gray-400" id="qr-order-label">ออร์เดอร์ #—</p>
+        <!-- QR ปลอม สวยงาม -->
+        <div class="bg-white border-2 border-gray-100 rounded-2xl p-4 inline-block mx-auto">
+            <svg id="qr-svg" width="180" height="180" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+        <div class="bg-blue-50 rounded-xl px-4 py-3">
+            <p class="text-xs text-gray-400">ยอดที่ต้องชำระ</p>
+            <p id="qr-amount" class="text-2xl font-black text-violet-700">฿0</p>
+        </div>
+        <p class="text-[11px] text-gray-400">สแกนเพื่อชำระผ่าน PromptPay<br>รหัส: 066-xxx-xxxx</p>
+        <div class="grid grid-cols-2 gap-3 pt-2">
+            <button onclick="closeQR()" class="py-3 rounded-xl border border-gray-200 font-bold text-sm text-gray-500 active:scale-95">ปิด</button>
+            <button onclick="confirmQRPaid()" class="py-3 rounded-xl bg-green-500 text-white font-black text-sm active:scale-95">✅ รับเงินแล้ว</button>
+        </div>
+    </div>
+</div>
 
 <!-- Edit Product Modal -->
 <div id="edit-modal" class="modal-bg">
@@ -367,6 +391,8 @@ function clearCart() { if (confirm('ล้างบิลทั้งหมด?'
 
 async function processCheckout() {
     if (!cart.length) return alert('กรุณาเพิ่มสินค้าก่อน');
+    const btn = document.getElementById('btn-checkout');
+    btn.disabled = true;
     const res = await fetch('/api/checkout', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
@@ -374,13 +400,79 @@ async function processCheckout() {
             items: cart.map(i => ({ QRCode: i.QRCode, ProductName: i.ProductName, qty: i.qty, price: i.UnitPrice }))
         })
     });
+    btn.disabled = false;
     const data = await res.json();
-    if (res.ok) {
-        alert(`บันทึกการขายสำเร็จ! 🎉\nออร์เดอร์ #${data.order_id} | ${currentPayMethod}`);
-        cart = []; renderCart(); switchPage('home');
+    if (!res.ok) return alert(data.error || 'เกิดข้อผิดพลาด');
+
+    if (currentPayMethod === 'QR PromptPay') {
+        // บันทึกเป็น Pending แล้วแสดง QR
+        cart = []; renderCart();
+        switchPage('orders');
+        await loadOrders();
+        filterOrders('Pending');
+        showQR(data.order_id, data.total_amount);
     } else {
-        alert(data.error || 'เกิดข้อผิดพลาด');
+        // เงินสด → Paid ทันที
+        cart = []; renderCart();
+        switchPage('home');
     }
+}
+
+// ===== QR CODE =====
+let currentQROrderId = null;
+
+function generateFakeQR(svg, size) {
+    // สร้าง QR ปลอมแบบ pixel art สุ่ม แต่ดูสมจริง
+    const cell = size / 21;
+    let cells = [];
+    // corner squares
+    const corners = [[0,0],[0,14],[14,0]];
+    for (const [cx,cy] of corners) {
+        for (let r=0;r<7;r++) for (let c=0;c<7;c++) {
+            const inner = r>=1&&r<=5&&c>=1&&c<=5;
+            const core  = r>=2&&r<=4&&c>=2&&c<=4;
+            if (!inner || core) cells.push([cy+r, cx+c]);
+        }
+    }
+    // random data cells
+    for (let r=0;r<21;r++) for (let c=0;c<21;c++) {
+        const inCorner = (r<8&&c<8)||(r<8&&c>12)||(r>12&&c<8);
+        if (!inCorner && Math.random() > 0.5) cells.push([r,c]);
+    }
+    let rects = '';
+    const seen = new Set();
+    for (const [r,c] of cells) {
+        const key = `${r},${c}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rects += `<rect x="${c*cell+1}" y="${r*cell+1}" width="${cell-1}" height="${cell-1}" fill="#1e1b3a"/>`;
+    }
+    svg.innerHTML = rects;
+}
+
+function showQR(orderId, amount) {
+    currentQROrderId = orderId;
+    document.getElementById('qr-order-label').textContent = `ออร์เดอร์ #${orderId}`;
+    document.getElementById('qr-amount').textContent = '฿' + Number(amount).toLocaleString();
+    generateFakeQR(document.getElementById('qr-svg'), 180);
+    document.getElementById('qr-modal').classList.add('open');
+}
+
+function closeQR() {
+    document.getElementById('qr-modal').classList.remove('open');
+    currentQROrderId = null;
+}
+
+async function confirmQRPaid() {
+    if (!currentQROrderId) return;
+    await confirmPaid(currentQROrderId);
+    closeQR();
+}
+
+async function confirmPaid(oid) {
+    const res = await fetch(`/api/orders/${oid}/pay`, { method: 'POST' });
+    if (res.ok) { await loadOrders(); filterOrders('Pending'); }
+    else { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
 }
 
 // ===== ORDERS =====
@@ -419,7 +511,12 @@ function renderOrders(orders) {
                         <p class="font-black text-violet-700 text-lg mt-1">฿${(o.TotalAmount||0).toLocaleString()}</p>
                     </div>
                 </div>
-                ${o.OrderStatus === 'Pending' ? `<button onclick="cancelOrder(${o.OrderID})" class="w-full py-2 text-xs font-bold text-red-500 border border-red-200 rounded-xl active:scale-95">ยกเลิกออร์เดอร์</button>` : ''}
+                ${o.OrderStatus === 'Pending' ? `
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="showQR(${o.OrderID},${o.TotalAmount})" class="py-2.5 text-xs font-bold text-violet-600 bg-violet-50 border border-violet-200 rounded-xl active:scale-95">📱 ดู QR</button>
+                    <button onclick="confirmPaid(${o.OrderID})" class="py-2.5 text-xs font-bold text-green-600 bg-green-50 border border-green-200 rounded-xl active:scale-95">✅ รับเงินแล้ว</button>
+                </div>
+                <button onclick="cancelOrder(${o.OrderID})" class="w-full py-2 text-xs font-bold text-red-400 border border-red-100 rounded-xl active:scale-95">ยกเลิกออร์เดอร์</button>` : ''}
             </div>`;
         }).join('')
         : '<div class="text-center py-12 text-gray-300 text-sm">ไม่มีออร์เดอร์</div>';

@@ -388,10 +388,14 @@ def checkout():
     if not store_id: return jsonify({'error': 'Unauthorized'}), 401
     d = request.json  # { items:[{QRCode, ProductName, qty, price}], payment_method }
     with get_db() as conn:
-        total = sum(i['qty'] * i['price'] for i in d['items'])
+        method = d.get('payment_method', 'Cash')
+        is_qr  = method == 'QR PromptPay'
+        status = 'Pending' if is_qr else 'Paid'
+        total  = sum(i['qty'] * i['price'] for i in d['items'])
+
         order_id = conn.execute(
             'INSERT INTO Orders (StoreID, OrderTime, TotalAmount, OrderStatus) VALUES (?,?,?,?)',
-            (store_id, datetime.now(), round(total, 2), 'Paid')
+            (store_id, datetime.now(), round(total, 2), status)
         ).lastrowid
 
         for item in d['items']:
@@ -408,13 +412,14 @@ def checkout():
                     (order_id, prod['ProductID'], item['qty'], round(item['qty'] * item['price'], 2))
                 )
 
-        method = d.get('payment_method', 'Cash')
-        conn.execute(
-            'INSERT INTO Payments (OrderID, PaymentMethod, AmountPaid, PaymentTime) VALUES (?,?,?,?)',
-            (order_id, method, round(total, 2), datetime.now())
-        )
+        # เงินสด → บันทึก Payment ทันที, QR → รอยืนยัน
+        if not is_qr:
+            conn.execute(
+                'INSERT INTO Payments (OrderID, PaymentMethod, AmountPaid, PaymentTime) VALUES (?,?,?,?)',
+                (order_id, method, round(total, 2), datetime.now())
+            )
         conn.commit()
-    return jsonify({'message': 'ขายสำเร็จ', 'order_id': order_id})
+    return jsonify({'message': 'ขายสำเร็จ', 'order_id': order_id, 'total_amount': round(total, 2), 'status': status})
 
 # ================= DASHBOARD SUMMARY =================
 @app.route('/api/dashboard-summary')
@@ -564,6 +569,23 @@ def cancel_order(oid):
         conn.execute("UPDATE Orders SET OrderStatus='Cancelled' WHERE OrderID=?", (oid,))
         conn.commit()
     return jsonify({'message': 'ยกเลิกสำเร็จ'})
+
+@app.route('/api/orders/<int:oid>/pay', methods=['POST'])
+def confirm_order_paid(oid):
+    store_id = session.get('store_id')
+    if not store_id: return jsonify({'error': 'Unauthorized'}), 401
+    with get_db() as conn:
+        order = conn.execute('SELECT * FROM Orders WHERE OrderID=? AND StoreID=?', (oid, store_id)).fetchone()
+        if not order: return jsonify({'error': 'ไม่พบออร์เดอร์'}), 404
+        if order['OrderStatus'] != 'Pending':
+            return jsonify({'error': 'ออร์เดอร์นี้ไม่ได้รอชำระ'}), 400
+        conn.execute("UPDATE Orders SET OrderStatus='Paid' WHERE OrderID=?", (oid,))
+        conn.execute(
+            'INSERT INTO Payments (OrderID, PaymentMethod, AmountPaid, PaymentTime) VALUES (?,?,?,?)',
+            (oid, 'QR PromptPay', order['TotalAmount'], datetime.now())
+        )
+        conn.commit()
+    return jsonify({'message': 'ยืนยันการชำระสำเร็จ'})
 
 # ================= ADMIN: Google OAuth =================
 def admin_required(f):
