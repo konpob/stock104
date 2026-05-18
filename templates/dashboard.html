@@ -34,7 +34,7 @@
         .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200; }
         .modal-bg.open { display:flex; align-items:flex-end; }
         .modal-sheet { background:white; border-radius:24px 24px 0 0; padding:24px; width:100%; max-height:90vh; overflow-y:auto; }
-        .bottom-safe { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+        .bottom-safe { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
         input, select, textarea { font-family: 'Kanit', sans-serif; }
         .qr-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:300; align-items:center; justify-content:center; padding:20px; }
         .qr-modal.open { display:flex; }
@@ -126,7 +126,7 @@
             <span class="font-bold text-sm text-gray-600">🛒 รายการ</span>
             <button onclick="clearCart()" class="text-xs text-red-400 font-bold bg-red-50 px-3 py-1 rounded-full">ล้างบิล</button>
         </div>
-        <div id="cart-list" class="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50 max-h-[28vh] overflow-y-auto">
+        <div id="cart-list" class="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50 max-h-[35vh] overflow-y-auto">
             <p class="text-center py-8 text-gray-300 text-sm italic">ยังไม่มีสินค้า</p>
         </div>
     </div>
@@ -143,7 +143,7 @@
 </div>
 
 <!-- ===== PAGE 3: ออร์เดอร์ ===== -->
-<div id="page-orders" class="page bottom-safe p-4 space-y-3">
+<div id="page-orders" class="page p-4 space-y-3" style="padding-bottom: calc(120px + env(safe-area-inset-bottom))">
     <div class="flex gap-2">
         <button onclick="filterOrders('all')" id="ofilter-all" class="px-4 py-2 rounded-full text-sm font-bold bg-violet-600 text-white">ทั้งหมด</button>
         <button onclick="filterOrders('Paid')" id="ofilter-Paid" class="px-4 py-2 rounded-full text-sm font-bold bg-white text-gray-500 border border-gray-200">✅ ชำระแล้ว</button>
@@ -154,7 +154,7 @@
 </div>
 
 <!-- ===== PAGE 4: รายงาน ===== -->
-<div id="page-report" class="page bottom-safe p-4 space-y-4">
+<div id="page-report" class="page" style="padding-bottom: calc(120px + env(safe-area-inset-bottom))" class="page bottom-safe p-4 space-y-4">
 
     <!-- Tab bar -->
     <div class="flex bg-white rounded-2xl p-1 border border-gray-100 shadow-sm">
@@ -281,7 +281,7 @@
 </div>
 
 <!-- ===== PAGE 5: จัดการ ===== -->
-<div id="page-manage" class="page bottom-safe p-4 space-y-3">
+<div id="page-manage" class="page" style="padding-bottom: calc(120px + env(safe-area-inset-bottom))" class="page bottom-safe p-4 space-y-3">
     <div class="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
         <button onclick="showManageTab('products')" id="mtab-products" class="manage-tab active-tab whitespace-nowrap px-4 py-2 rounded-full text-sm font-bold bg-violet-600 text-white">📦 สินค้า</button>
         <button onclick="showManageTab('add-product')" id="mtab-add-product" class="manage-tab whitespace-nowrap px-4 py-2 rounded-full text-sm font-bold bg-white text-gray-500 border border-gray-200">➕ เพิ่มสินค้า</button>
